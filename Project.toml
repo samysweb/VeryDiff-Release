@@ -1,0 +1,13 @@
+name = "VeryDiff"
+uuid = "46246037-a9ce-44df-b2b1-49d8cf705fcd"
+authors = ["Samuel Teuber <teuber@kit.edu>"]
+version = "0.1.0"
+
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MaskedArrays = "e3e6debb-e142-42bc-8e83-ba8646d1d252"
+NLSolvers = "337daf1e-9722-11e9-073e-8b9effe078ba"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
+VNNLib = "286915b0-5841-4eea-9013-d818f395ad8c"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
