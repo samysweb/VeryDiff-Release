@@ -40,7 +40,7 @@ for i in 1:10
         N2 = Network(deepcopy(layers2))
         push!(networks,(N1,N2,new_dim))
     end
-    Z_original1 = Zonotope(Matrix(0.01I,input_dim,input_dim),zeros(Float64,input_dim))
+    Z_original1 = Zonotope(Matrix(0.02I,input_dim,input_dim),zeros(Float64,input_dim))
     Z_original2 = deepcopy(Z_original1)
     ∂Z_original = Zonotope(Matrix(0.0I,input_dim,input_dim),zeros(Float64,input_dim))
     Z_original = DiffZonotope(Z_original1,Z_original2,∂Z_original,0,0,0)

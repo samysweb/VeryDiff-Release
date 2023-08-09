@@ -54,14 +54,14 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     # 
     λ = ifelse.((upper₁.<=0.0 .&& upper₂ .<= 0.0) , 0.0, ifelse.(lower₁.>=0.0 .&& lower₂ .>= 0.0, 1.0, ifelse.(∂upper .<= 0.0,0.0,α)))
 
-    crossing = (lower₁ .< 0.0 .&& upper₁ .> 0.0) .|| (lower₂ .< 0.0 .&& upper₂ .> 0.0)
+    crossing = (lower₁ .< 0.0 .&& upper₁ .> 0.0) .|| (lower₂ .< 0.0 .&& upper₂ .> 0.0) .|| (lower₁ .> 0 .&& upper₂ .< 0) .|| (lower₂ .> 0 .&& upper₁ .< 0)
     
     # Difference between N1 - N2
     # Case 0: Both instable
     # Case 1: N1 zero -> Δ = 0-max(0,x1 - Δᵢ) = 0 or Δᵢ - x1 >= Δᵢ
     δ = 0.5*max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
 
-    γ = crossing .* (-δ .- λ .*∂lower ) # Decrease by ∂lower to ensure 0 reachable everywhere; decrease by 0.5*∂upper for approximation (additional dimension scaled by 0.5*∂upper)
+    γ = crossing .* (-δ .- λ .*∂lower ) # Decrease by ∂lower to ensure 0 reachable everywhere; decrease by 0.5*δ for approximation (additional dimension scaled by larger deviation)
 
     ĉ = λ .* Z.∂Z.c + γ
     Ĝ = λ .* Z.∂Z.G

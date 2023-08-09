@@ -7,7 +7,7 @@ using VNNLib
 # This is still missing the optimizations for instable + linear neurons
 function run()
     reset_timer!(VeryDiff.to)
-    N_original = parse_network(VNNLib.load_network("./test/examples/networks/acas-1-3.onnx"))
+    N_original = parse_network(VNNLib.load_network("./test/examples/networks/acas-2-7.onnx"))
 
     N32 = VeryDiff.truncate_network(Float32,N_original)
     N16 = VeryDiff.truncate_network(Float16,N_original)
@@ -39,6 +39,7 @@ function run()
     total_zonos = 1
     println("")
     prop_state = PropState(true)
+    k = 0
     while length(todolist)>0
         #println("-----")
         work_share, Zin = pop!(todolist)
@@ -60,9 +61,19 @@ function run()
         if any(abs.(bounds).>epsilon)
             # println(size(Z.∂Z.G))
             # println(count((Z.∂Z.G[:,6:end].!=0.0),dims=2))
-            split_d = argmax(sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*diag(Zin.Z₁.G).*Z.∂Z.G[:,1:5],dims=1)[1,:])
+            #split_d = k+1
+            #k = mod(k+1,5)
+            k+=1
+            #if k < 20
+            #if k%2 == 0
+            split_d = argmax(
+                sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*diag(Zin.Z₁.G).*Z.∂Z.G[:,1:5],dims=1)[1,:]
+                .+
+                sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*diag(Zin.Z₁.G).*(Z.Z₁.G[:,1:5] .- Z.Z₂.G[:,1:5] ),dims=1)[1,:]
+            )
             #println(split_d)
             Z1 = deepcopy(Zin.Z₁)
+            #println(work_done," - ",zono_bounds(Z1))
             low = Z1.c[split_d] - Z1.G[split_d,split_d]
             high = Z1.c[split_d] + Z1.G[split_d,split_d]
             mid = (high+low)/2
@@ -70,20 +81,20 @@ function run()
             distance1 = mid1-low
             Z1.G[split_d,split_d] = distance1
             Z1.c[split_d] = mid1
-            #println("Partition 1: $(d) [$(low),$(mid)] -> $(mid1)±$(distance1)")
+            #println("Partition 1: $(split_d) [$(low),$(mid)] -> $(mid1)±$(distance1)")
 
             Z2 = deepcopy(Zin.Z₁)
             mid2 = (mid+high)/2
             distance2 = mid2-mid
             Z2.G[split_d,split_d] = distance2
             Z2.c[split_d] = mid2
-            #println("Partition 2: $(d) [$(mid),$(high)] -> $(mid2)±$(distance2)")
+            #println("Partition 2: $(split_d) [$(mid),$(high)] -> $(mid2)±$(distance2)")
             push!(todolist,(work_share/2.0,DiffZonotope(Z1,deepcopy(Z1),deepcopy(∂Z_original),0,0,0)))
             push!(todolist,(work_share/2.0,DiffZonotope(Z2,deepcopy(Z2),deepcopy(∂Z_original),0,0,0)))
             total_zonos+=2
             done=false
         else
-            # println("Done:")
+            #println("Done:")
             # println(size(Z.∂Z.G))
             # println(count((Z.∂Z.G[:,6:end].!=0.0),dims=2))
             work_done+=work_share
