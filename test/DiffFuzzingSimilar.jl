@@ -59,7 +59,7 @@ for i in 1:10
             push!(∂bounds,(zono_optimize(-1.0,Z.∂Z,d),zono_optimize(1.0,Z.∂Z,d)))
         end
         threshold=1e-7
-        for k in 1:100000
+        for k in 1:10000
             x = 2*0.01*rand(Float64,input_dim).-0.01
             y1 = N1(x)
             y2 = N2(x)

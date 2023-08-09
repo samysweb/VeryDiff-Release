@@ -6,7 +6,7 @@ import VNNLib.NNLoader.ReLU
 
 function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P::PropState)
     return @timeit to "DiffZonotope_DenseProp" begin
-    println("Dense")
+    #println("Dense")
     L1, ∂L, L2 = Ls
     ∂G = L1.W*Z.∂Z.G[:,:]
     input_dim = size(Z.Z₂,2)-Z.num_approx₂
@@ -24,12 +24,13 @@ end
 
 function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::PropState)
     return @timeit to "DiffZonotope_DenseProp" begin
-    println("ReLU")
+    #println("ReLU")
     L1, _, L2 = Ls
     bounds₁ = zono_bounds(Z.Z₁)
     bounds₂ = zono_bounds(Z.Z₂)
     ∂bounds = zono_bounds(Z.∂Z)
     input_dim = size(Z.Z₂,2)-Z.num_approx₂
+    output_dim = size(Z.Z₂,1)
 
     lower₁ = @view bounds₁[:,1]
     upper₁ = @view bounds₁[:,2]
@@ -37,6 +38,17 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     upper₂ = @view bounds₂[:,2]
     ∂lower = @view ∂bounds[:,1]
     ∂upper = @view ∂bounds[:,2]
+    if !P.first
+        lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₁
+        lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₂
+        lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* lower₁
+        upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* upper₁
+        lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* lower₂
+        upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* upper₂
+        upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₁
+        upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₂
+        P.i += output_dim
+    end
 
     α = ∂upper ./ (∂upper - ∂lower)
     # 
@@ -44,22 +56,24 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
 
     crossing = (lower₁ .< 0.0 .&& upper₁ .> 0.0) .|| (lower₂ .< 0.0 .&& upper₂ .> 0.0)
     
-    δ = 0.5*max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower)
-
-    if any(∂upper .<= 0)
-        @warn "Contains negative differental upper bound"
-    end
+    # Difference between N1 - N2
+    # Case 0: Both instable
+    # Case 1: N1 zero -> Δ = 0-max(0,x1 - Δᵢ) = 0 or Δᵢ - x1 >= Δᵢ
+    δ = 0.5*max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
 
     γ = crossing .* (-δ .- λ .*∂lower ) # Decrease by ∂lower to ensure 0 reachable everywhere; decrease by 0.5*∂upper for approximation (additional dimension scaled by 0.5*∂upper)
 
     ĉ = λ .* Z.∂Z.c + γ
     Ĝ = λ .* Z.∂Z.G
 
-
-    input_dim = size(Z.Z₂,2)-Z.num_approx₂
     row_count = size(lower₁,1)
-    println("Crossing: ",count(x->x,crossing),"/",row_count)
+    if P.first
+        P.num_relus+=output_dim
+        P.relu_config = vcat(P.relu_config,fill(0,output_dim))
+    end
+    #println("Crossing: ",count(x->x,crossing),"/",row_count)
     # The 1e-5 margin is necessary, because we otherwise observed floaty rounding errors in the output intervals
+    # TODO(steuber): This seems like a bad idea?
     E = (δ.+ sign.(δ)*1e-5) .* I(row_count)[:, crossing]
     #∂Z_new = Zonotope([Ĝ E], ĉ)
     Z₁_new = L1(Z.Z₁,P;bounds = bounds₁)

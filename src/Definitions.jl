@@ -13,7 +13,13 @@ mutable struct DiffZonotope
 end
 
 mutable struct PropState
-    empty :: Bool
+    first :: Bool
+    i :: Int64
+    num_relus :: Int64
+    relu_config :: Vector{Int64}
+    function PropState(first :: Bool)
+        return new(first, 0, 0, Int64[])
+    end
 end
 
 struct PropConfig

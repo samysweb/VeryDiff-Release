@@ -24,7 +24,7 @@ include("Verifier.jl")
 export Network,GeminiNetwork,Layer,Dense,ReLU,WrappedReLU
 export parse_network
 export Zonotope, DiffZonotope, PropState
-export zono_optimize
+export zono_optimize, zono_bounds
 export verify_network
 
 end # module AlphaZono
