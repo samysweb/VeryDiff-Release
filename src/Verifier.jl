@@ -1,13 +1,186 @@
 function verify_network(
-    N :: Network,
-    Z_in :: Zonotope,
-    P :: PropState,
-    C :: Union{Nothing,PropConfig})
-    Z_out = N(Z_in,P)
-    for i in 1:size(Z_out,2)
-        min_res = zono_optimize(-1.0,Z_out,i)
-        max_res = zono_optimize(1.0,Z_out,i)
-        println("Dim ",i,": [",min_res,",",max_res,"]")
+    N1 :: Network,
+    N2 :: Network,
+    bounds,
+    epsilon::Float64)
+    # Timing
+    reset_timer!(to)
+    @timeit to "Initialize" begin
+    # Prepare Zonotope Initialization
+    #@timeit to "Prep_Zono_Init" begin
+    low = @view bounds[:,1]
+    high = @view bounds[:,2]
+    mid = (high.+low) ./ 2
+    distance = mid .- low
+    input_dim = length(low)
+    #end
+
+    # Initialize Zonotope
+    #@timeit to "Zono_Init" begin
+    Z_original1 = Zonotope(distance .* Matrix(I,input_dim,input_dim),mid)
+    Z_original2 = deepcopy(Z_original1)
+    ∂Z_original = Zonotope(Matrix(0.0I,input_dim,input_dim),zeros(Float64,input_dim))
+    #end
+
+    #@timeit to "Network_Init" begin
+    N = GeminiNetwork(N1,N2)
+    #end
+
+    # Statistics
+    #@timeit to "Statistics_Init" begin
+    work_done = 0.0
+    total_zonos = 1
+    #end
+
+    #Config
+    prop_state = PropState(true)
+    num_threads = Threads.nthreads()
+    single_threaded = num_threads == 1
+    if single_threaded
+        common_state = MultiThreaddedQueue(Tuple{Float64,DiffZonotope},1)
+    else
+        common_state = MultiThreaddedQueue(Tuple{Float64,DiffZonotope},num_threads)
     end
-    return low > 0, low, nothing
+    push!(common_state.common_queue,
+        (1.0,DiffZonotope(Z_original1, Z_original2,deepcopy(∂Z_original),0,0,0))
+    )
+    end
+    @timeit to "Verify" begin
+    if single_threaded
+        worker_function(common_state, 1, prop_state,N,N1,N2,
+        epsilon)
+    else
+        worker_list = []
+        for threadid in 1:(num_threads)
+            push!(worker_list,Threads.@spawn worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon))
+        end
+        println("Thread $(Threads.threadid()) is waiting for termination of workers")
+        while !common_state.should_exit
+            GC.safepoint()
+            sleep(0.05)
+            #println("Thread $(Threads.threadid()) is waiting for termination of workers $(worker_list)")
+        end
+        #worker_function(common_state, prop_state,N,N1,N2, epsilon)
+        for w in worker_list
+            wait(w)
+        end
+        #println(worker_list)
+    end
+    end
+    #worker_function(common_state, prop_state,N,N1,N2, epsilon)
+    show(to)
+    #end
+end
+
+function worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon)
+    try
+        thread_result = @timed worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon)
+        println("[Thread $(threadid)] Finished in $(round(thread_result.time;digits=2))s")
+        return thread_result.value
+    catch e
+        println("[Thread $(threadid)] Caught exception: $(e)")
+    end
+end
+function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon)
+    # @debug "Worker initiated on thread $(threadid)"
+    prop_state = deepcopy(prop_state)
+    k = 0
+    total_zonos=0
+    generated_zonos = 0
+    # @debug "[Thread $(threadid)] Starting worker"
+    task_queue = Queue(Tuple{Float64,DiffZonotope})
+    # @debug "[Thread $(threadid)] Syncing queues"
+    should_terminate = sync_queues!(threadid, common_state, task_queue)
+    sync_res = @timed sync_queues!(threadid, common_state, task_queue)
+    should_terminate = sync_res.value
+    wait_time = sync_res.time
+    # @debug "[Thread $(threadid)] Initiating loop"
+    while !should_terminate
+        try
+            work_share, Zin = pop!(task_queue)
+            # @debug "[Thread $(threadid)] got work share $(work_share) running on $(Threads.threadid())"
+            #println("Processing task on thread $(threadid)")
+            total_zonos+=1
+            # Initial Pass
+            #prop_state.i = 1
+            #@timeit to "NetworkProp" 
+            Zout = N(deepcopy(Zin), prop_state)
+            #println("Propagated Zonotope on thread $(threadid)")
+            # First round?
+            out_bounds = zono_bounds(Zout.∂Z)
+            if isone(work_share)
+                # Print out initial bounds
+                println("[",join([x for x in out_bounds[:,1]],","),"]")
+                println("[",join([x for x in out_bounds[:,2]],","),"]")
+            end
+            #prop_state.first = false
+            # Larger than epsilon?
+            #@timeit to "PostProp" begin
+            if any(abs.(out_bounds).>epsilon)
+                #println("Splitting on thread $(threadid)")
+                # Is concrete example larger than epsilon?
+                if maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₂.c)))>epsilon
+                    # Concrete example is larger than epsilon
+                    println("\nFound counterexample: $(Zin.Z₁.c): Distance $(maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₁.c))))")
+                    invoke_termination(common_state)
+                else
+                    #@timeit to "Split" begin
+                    #Split into two cases
+                    split_d = get_splitting(Zin,Zout,out_bounds,epsilon)
+                    Z1, Z2 = split_zono(split_d, Zin,work_share)
+                    Zin=nothing
+                    push!(task_queue, Z1)
+                    push!(task_queue, Z2)
+                    generated_zonos+=2
+                    #end
+                end
+            end
+        finally
+            #if k%100 == 0
+            sync_res = @timed sync_queues!(threadid, common_state, task_queue)
+            should_terminate = sync_res.value
+            wait_time += sync_res.time
+            #end
+        end
+        k+=1
+        # if k%1000 == 0
+        #     println("[Thread $(threadid)] Processed $(total_zonos) zonotopes")
+        # end
+        #end
+    end
+    print("Processed $(total_zonos) zonotopes; Generated $(generated_zonos) (Waited $(round(wait_time;digits=2))s)\n")
+end
+
+function get_splitting(Zin,Zout,out_bounds,epsilon)
+    #return @timeit to "Split_Heuristic"
+    return argmax(
+        #max.(
+        #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*Zout.∂Z.G[:,1:5],dims=1)[1,:],
+        #.+
+        abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:5] .- Zout.Z₂.G[:,1:5] ),dims=1)[1,:]
+        #)
+    )
+end
+
+function split_zono(d, Z, work_share)
+    #return @timeit to "Split_Zono" begin
+    Z1 = deepcopy(Z.Z₁)
+    low = Z1.c[d] - Z1.G[d,d]
+    high = Z1.c[d] + Z1.G[d,d]
+    mid = (high+low)/2
+    mid1 = (low+mid)/2
+    distance1 = mid1-low
+    Z1.G[d,d] = distance1
+    Z1.c[d] = mid1
+    Z1 = DiffZonotope(Z1,deepcopy(Z1),deepcopy(Z.∂Z),0,0,0)
+
+    Z2 = deepcopy(Z.Z₁)
+    mid2 = (mid+high)/2
+    distance2 = mid2-mid
+    Z2.G[d,d] = distance2
+    Z2.c[d] = mid2
+    Z2 = DiffZonotope(Z2,deepcopy(Z2),deepcopy(Z.∂Z),0,0,0)
+
+    return (work_share/2.0,Z1), (work_share/2.0,Z2)
+    #end
 end

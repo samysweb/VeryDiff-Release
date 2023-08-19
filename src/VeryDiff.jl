@@ -19,6 +19,7 @@ include("Network.jl")
 include("Zonotope.jl")
 include("Layers_Zonotope.jl")
 include("Layers_DiffZonotope.jl")
+include("MultiThreadding.jl")
 include("Verifier.jl")
 
 export Network,GeminiNetwork,Layer,Dense,ReLU,WrappedReLU

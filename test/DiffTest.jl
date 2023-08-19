@@ -8,6 +8,7 @@ using VNNLib
 function run()
     reset_timer!(VeryDiff.to)
     N_original = parse_network(VNNLib.load_network("./test/examples/networks/acas-2-7.onnx"))
+    #N_original = parse_network(VNNLib.load_network("./test/examples/networks/acas-1-3.onnx"))
 
     N32 = VeryDiff.truncate_network(Float32,N_original)
     N16 = VeryDiff.truncate_network(Float16,N_original)
@@ -34,7 +35,7 @@ function run()
 
     todolist = [(1.0,DiffZonotope(Z_original1,Z_original2,deepcopy(∂Z_original),0,0,0))]
     work_done = 0.0
-    epsilon = 0.05 #1.0 #0.05
+    epsilon = 0.01#0.01 #1.0 #0.05
     #epsilon=0.001
     total_zonos = 1
     println("")
@@ -59,6 +60,13 @@ function run()
 
         #println(sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*Z.∂Z.G[:,5:end],dims=2))
         if any(abs.(bounds).>epsilon)
+            if length(todolist)>1_000
+                if k%128==0
+                println("\nSeemingly failing, this will most likely not terminate...")
+                println("Maximal deviation: $(maximum(abs.(bounds)))")
+                println("Input Ranges: $(diag(Zin.Z₁.G))")
+                end
+            end
             # println(size(Z.∂Z.G))
             # println(count((Z.∂Z.G[:,6:end].!=0.0),dims=2))
             #split_d = k+1
@@ -67,9 +75,11 @@ function run()
             #if k < 20
             #if k%2 == 0
             split_d = argmax(
-                sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*diag(Zin.Z₁.G).*Z.∂Z.G[:,1:5],dims=1)[1,:]
-                .+
-                sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*diag(Zin.Z₁.G).*(Z.Z₁.G[:,1:5] .- Z.Z₂.G[:,1:5] ),dims=1)[1,:]
+                #max.(
+                #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*Z.∂Z.G[:,1:5],dims=1)[1,:],
+                #.+
+                abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(bounds).>epsilon,dims=2)[:,1].*(Z.Z₁.G[:,1:5] .- Z.Z₂.G[:,1:5] ),dims=1)[1,:]
+                #)
             )
             #println(split_d)
             Z1 = deepcopy(Zin.Z₁)
@@ -89,8 +99,18 @@ function run()
             Z2.G[split_d,split_d] = distance2
             Z2.c[split_d] = mid2
             #println("Partition 2: $(split_d) [$(mid),$(high)] -> $(mid2)±$(distance2)")
-            push!(todolist,(work_share/2.0,DiffZonotope(Z1,deepcopy(Z1),deepcopy(∂Z_original),0,0,0)))
-            push!(todolist,(work_share/2.0,DiffZonotope(Z2,deepcopy(Z2),deepcopy(∂Z_original),0,0,0)))
+            if maximum(abs.(N32(Z1.c)-N16(Z1.c)))<=epsilon
+                push!(todolist,(work_share/2.0,DiffZonotope(Z1,deepcopy(Z1),deepcopy(∂Z_original),0,0,0)))
+            else
+                println("\nFound counterexample: $(Z1.c): Distance $(maximum(abs.(N32(Z1.c)-N16(Z1.c))))")
+                break
+            end
+            if maximum(abs.(N32(Z2.c) .- N16(Z2.c))) <= epsilon
+                push!(todolist,(work_share/2.0,DiffZonotope(Z2,deepcopy(Z2),deepcopy(∂Z_original),0,0,0)))
+            else
+                println("\nFound counterexample: $(Z2.c): Distance $(maximum(abs.(N32(Z2.c)-N16(Z2.c))))")
+                break
+            end
             total_zonos+=2
             done=false
         else
@@ -108,13 +128,13 @@ function run()
         #    println("Done this one")
         #end
         if total_zonos%101==0
-            print("\rTotal Zonos so far: $(total_zonos) Work done: $(work_done)")
+            print("\rTotal Zonos so far: $(total_zonos) Work done: $(work_done) (Stack Length: $(length(todolist)))            ")
         end
 
     end
     println("")
     println("Total Zonos: $(total_zonos)")
+    show(VeryDiff.to)
 end
 
 run()
-show(VeryDiff.to)

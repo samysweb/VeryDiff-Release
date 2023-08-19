@@ -5,7 +5,8 @@ import VNNLib.NNLoader.Dense
 import VNNLib.NNLoader.ReLU
 
 function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P::PropState)
-    return @timeit to "DiffZonotope_DenseProp" begin
+    #println("Prop dense")
+    #return @timeit to "DiffZonotope_DenseProp" begin
     #println("Dense")
     L1, ∂L, L2 = Ls
     ∂G = L1.W*Z.∂Z.G[:,:]
@@ -19,11 +20,12 @@ function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P
     ∂c = L1.W*Z.∂Z.c .+ ∂L.W * Z.Z₂.c .+ ∂L.b
     ∂Z_new = Zonotope(∂G,∂c)
     return DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),∂Z_new,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
-    end
+    #end
 end
 
 function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::PropState)
-    return @timeit to "DiffZonotope_DenseProp" begin
+    #println("Prop relu")
+    #return @timeit to "DiffZonotope_DenseProp" begin
     #println("ReLU")
     L1, _, L2 = Ls
     bounds₁ = zono_bounds(Z.Z₁)
@@ -31,46 +33,54 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     ∂bounds = zono_bounds(Z.∂Z)
     input_dim = size(Z.Z₂,2)-Z.num_approx₂
     output_dim = size(Z.Z₂,1)
-
+    #println("Prop relu 1")
     lower₁ = @view bounds₁[:,1]
     upper₁ = @view bounds₁[:,2]
     lower₂ = @view bounds₂[:,1]
     upper₂ = @view bounds₂[:,2]
     ∂lower = @view ∂bounds[:,1]
     ∂upper = @view ∂bounds[:,2]
-    if !P.first
-        lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₁
-        lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₂
-        lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* lower₁
-        upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* upper₁
-        lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* lower₂
-        upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* upper₂
-        upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₁
-        upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₂
-        P.i += output_dim
-    end
-
+    #println("Prop relu 2")
+    # if !P.first
+    #     lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₁
+    #     lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₂
+    #     lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* lower₁
+    #     upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* upper₁
+    #     lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* lower₂
+    #     upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* upper₂
+    #     upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₁
+    #     upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₂
+    #     P.i += output_dim
+    # end
+    #println("Prop relu 3")
     α = ∂upper ./ (∂upper - ∂lower)
     # 
+    #println("Prop relu 3.1")
     λ = ifelse.((upper₁.<=0.0 .&& upper₂ .<= 0.0) , 0.0, ifelse.(lower₁.>=0.0 .&& lower₂ .>= 0.0, 1.0, ifelse.(∂upper .<= 0.0,0.0,α)))
+    #println("Prop relu 3.2")
+    lower₁_less0 = lower₁ .< 0.0
+    lower₂_less0 = lower₂ .< 0.0
+    upper₁_less0 = upper₁ .< 0.0
+    upper₂_less0 = upper₂ .< 0.0
 
-    crossing = (lower₁ .< 0.0 .&& upper₁ .> 0.0) .|| (lower₂ .< 0.0 .&& upper₂ .> 0.0) .|| (lower₁ .> 0 .&& upper₂ .< 0) .|| (lower₂ .> 0 .&& upper₁ .< 0)
-    
+    crossing = (lower₁_less0 .&& (!).(upper₁_less0)) .|| (lower₂_less0 .&& (!).(upper₂_less0)) .|| ((!).(lower₁_less0) .&& upper₂_less0) .|| ((!).(lower₂_less0) .&& upper₁_less0)
+    #println("Prop relu 4")
     # Difference between N1 - N2
     # Case 0: Both instable
     # Case 1: N1 zero -> Δ = 0-max(0,x1 - Δᵢ) = 0 or Δᵢ - x1 >= Δᵢ
     δ = 0.5*max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
 
     γ = crossing .* (-δ .- λ .*∂lower ) # Decrease by ∂lower to ensure 0 reachable everywhere; decrease by 0.5*δ for approximation (additional dimension scaled by larger deviation)
-
+    #println("Prop relu 5")
     ĉ = λ .* Z.∂Z.c + γ
     Ĝ = λ .* Z.∂Z.G
-
+    #println("Prop relu 6")
     row_count = size(lower₁,1)
-    if P.first
-        P.num_relus+=output_dim
-        P.relu_config = vcat(P.relu_config,fill(0,output_dim))
-    end
+    #if P.first
+        #P.num_relus+=output_dim
+        #P.relu_config = vcat(P.relu_config,fill(0,output_dim))
+    #end
+    #println("Prop relu 7")
     #println("Crossing: ",count(x->x,crossing),"/",row_count)
     # The 1e-5 margin is necessary, because we otherwise observed floaty rounding errors in the output intervals
     # TODO(steuber): This seems like a bad idea?
@@ -78,6 +88,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     #∂Z_new = Zonotope([Ĝ E], ĉ)
     Z₁_new = L1(Z.Z₁,P;bounds = bounds₁)
     Z₂_new = L2(Z.Z₂,P;bounds = bounds₂)
+    #println("Prop relu 8")
     ∂Z_new = Zonotope(hcat(
         Ĝ[:,1:input_dim+Z.num_approx₁],
         zeros(Float64,(row_count,size(Z₁_new.G,2)-Z.num_approx₁-input_dim)),
@@ -86,6 +97,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         Ĝ[:,input_dim+Z.num_approx₁+Z.num_approx₂+1:end],
         E
     ), ĉ)
+    #println("Prop relu 9")
     # i=1
     # if size(∂lower,1)>=i
     #     println(lower₁[i])
@@ -102,10 +114,11 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     #     println(∂Z_new.G[i,:])
     # end
     return DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,size(Z₁_new,2)-input_dim,size(Z₂_new,2)-input_dim,Z.∂num_approx+size(E,2))
-    end
+    #end
 end
 
 
 function (N::GeminiNetwork)(Z :: DiffZonotope, P :: PropState)
+    #println("Prop network")
     return foldl((Z,Ls) -> propagate_diff_layer(Ls,Z,P),zip(N.network1.layers,N.diff_network.layers,N.network2.layers),init=Z)
 end

@@ -11,11 +11,11 @@ function (N::Network)(Z :: Zonotope, P :: PropState)
 end
 
 function (L::Dense)(Z :: Zonotope,P :: PropState)
-    return @timeit to "Zonotope_DenseProp" begin
+    #return @timeit to "Zonotope_DenseProp" begin
     G = L.W * Z.G
     c = L.W * Z.c .+ L.b
     return Zonotope(G,c)
-    end
+    #end
 end
 
 function get_slope(l,u, alpha)
@@ -29,7 +29,7 @@ function get_slope(l,u, alpha)
 end
 
 function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
-    return @timeit to "Zonotope_ReLUProp" begin
+    #return @timeit to "Zonotope_ReLUProp" begin
     row_count = size(Z.G,1)
     if isnothing(bounds)
         bounds = zono_bounds(Z)
@@ -50,5 +50,5 @@ function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
     E = γ .* I(row_count)[:, crossing]
 
     return Zonotope([Ĝ E], ĉ)
-    end
+    #end
 end

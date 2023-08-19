@@ -7,7 +7,7 @@ using TimerOutputs
 Random.seed!(1235);
 
 @timeit VeryDiff.to "Fuzzing" begin
-for i in 1:10
+for i in 1:50
     println("Networks $(i)")
     layers1 = Layer[]
     layers2 = Layer[]
