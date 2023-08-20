@@ -7,6 +7,15 @@ using LinearAlgebra
 using SparseArrays
 using VNNLib
 using NLSolvers
+#using ThreadPinning
+
+# We have our own multithreadding so we don't want to use BLAS multithreadding
+function __init__()
+    BLAS.set_num_threads(1)
+end
+
+#pinthreads(:cores)
+
 
 import Zygote.ChainRulesCore.rrule
 

@@ -58,12 +58,16 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     #println("Prop relu 3.1")
     λ = ifelse.((upper₁.<=0.0 .&& upper₂ .<= 0.0) , 0.0, ifelse.(lower₁.>=0.0 .&& lower₂ .>= 0.0, 1.0, ifelse.(∂upper .<= 0.0,0.0,α)))
     #println("Prop relu 3.2")
-    lower₁_less0 = lower₁ .< 0.0
-    lower₂_less0 = lower₂ .< 0.0
-    upper₁_less0 = upper₁ .< 0.0
-    upper₂_less0 = upper₂ .< 0.0
+    #lower₁_less0 = lower₁ .< 0.0
+    #lower₂_less0 = lower₂ .< 0.0
+    #upper₁_less0 = upper₁ .< 0.0
+    #upper₂_less0 = upper₂ .< 0.0
 
-    crossing = (lower₁_less0 .&& (!).(upper₁_less0)) .|| (lower₂_less0 .&& (!).(upper₂_less0)) .|| ((!).(lower₁_less0) .&& upper₂_less0) .|| ((!).(lower₂_less0) .&& upper₁_less0)
+    #crossing = (lower₁_less0 .&& (!).(upper₁_less0)) .|| (lower₂_less0 .&& (!).(upper₂_less0)) .|| ((!).(lower₁_less0) .&& upper₂_less0) .|| ((!).(lower₂_less0) .&& upper₁_less0)
+    crossing = [
+        ((l1 < 0.0 && u1 > 0) || (l2 < 0 && u2 > 0) || (l1 > 0 && u2 < 0) || (l2 > 0 && u1 < 0))
+        for (l1, u1, l2, u2) in zip(lower₁, upper₁, lower₂, upper₂)
+    ]
     #println("Prop relu 4")
     # Difference between N1 - N2
     # Case 0: Both instable
