@@ -9,15 +9,27 @@ function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P
     #return @timeit to "DiffZonotope_DenseProp" begin
     #println("Dense")
     L1, ∂L, L2 = Ls
-    ∂G = L1.W*Z.∂Z.G[:,:]
+    ∂G = Matrix{Float64}(undef, size(L1.W,1), size(Z.∂Z.G,2))
+    mul!(∂G, L1.W, Z.∂Z.G)
+    #∂G = L1.W*Z.∂Z.G
     input_dim = size(Z.Z₂,2)-Z.num_approx₂
-    accessed_range = 1:input_dim
+    # accessed_range = 1:input_dim
+    # if Z.num_approx₂ > 0
+    #     approx_two_range = input_dim + Z.num_approx₁ + 1
+    #     accessed_range = [accessed_range;approx_two_range:approx_two_range+Z.num_approx₂-1]
+    # end
+    #∂G[:,accessed_range] .+= ∂L.W*Z.Z₂.G
+    mul!((@view ∂G[:,1:input_dim]), ∂L.W, (@view Z.Z₂.G[:,1:input_dim]), 1.0, 1.0)
     if Z.num_approx₂ > 0
-        approx_two_range = input_dim + Z.num_approx₁ + 1
-        accessed_range = [accessed_range;approx_two_range:approx_two_range+Z.num_approx₂-1]
+        range_start = input_dim + Z.num_approx₁ + 1
+        range_end = input_dim + Z.num_approx₁ + Z.num_approx₂
+        mul!((@view ∂G[:,range_start:range_end]), ∂L.W, (@view Z.Z₂.G[:,(input_dim+1):end]), 1.0, 1.0)
     end
-    ∂G[:,accessed_range] .+= ∂L.W*Z.Z₂.G
-    ∂c = L1.W*Z.∂Z.c .+ ∂L.W * Z.Z₂.c .+ ∂L.b
+    #mul!((@view ∂G[:,accessed_range]), ∂L.W, Z.Z₂.G, 1.0, 1.0)
+    #∂c = L1.W*Z.∂Z.c .+ ∂L.W * Z.Z₂.c .+ ∂L.b
+    ∂c = L1.W*Z.∂Z.c #.+ ∂L.W * Z.Z₂.c .+ ∂L.b
+    mul!(∂c, ∂L.W, Z.Z₂.c, 1.0, 1.0)
+    ∂c .+= ∂L.b
     ∂Z_new = Zonotope(∂G,∂c)
     return DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),∂Z_new,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
     #end
@@ -40,19 +52,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     upper₂ = @view bounds₂[:,2]
     ∂lower = @view ∂bounds[:,1]
     ∂upper = @view ∂bounds[:,2]
-    #println("Prop relu 2")
-    # if !P.first
-    #     lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₁
-    #     lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 1) .* lower₂
-    #     lower₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* lower₁
-    #     upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 2) .* upper₁
-    #     lower₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* lower₂
-    #     upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 3) .* upper₂
-    #     upper₁ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₁
-    #     upper₂ = (P.relu_config[P.i:P.i+output_dim - 1] .!= 4) .* upper₂
-    #     P.i += output_dim
-    # end
-    #println("Prop relu 3")
+
     α = ∂upper ./ (∂upper - ∂lower)
     # 
     #println("Prop relu 3.1")
@@ -77,30 +77,60 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     γ = crossing .* (-δ .- λ .*∂lower ) # Decrease by ∂lower to ensure 0 reachable everywhere; decrease by 0.5*δ for approximation (additional dimension scaled by larger deviation)
     #println("Prop relu 5")
     ĉ = λ .* Z.∂Z.c + γ
-    Ĝ = λ .* Z.∂Z.G
+    # Ĝ = λ .* Z.∂Z.G
     #println("Prop relu 6")
     row_count = size(lower₁,1)
-    #if P.first
-        #P.num_relus+=output_dim
-        #P.relu_config = vcat(P.relu_config,fill(0,output_dim))
-    #end
-    #println("Prop relu 7")
-    #println("Crossing: ",count(x->x,crossing),"/",row_count)
-    # The 1e-5 margin is necessary, because we otherwise observed floaty rounding errors in the output intervals
+    num_crossing = count(crossing)
+ 
     # TODO(steuber): This seems like a bad idea?
-    E = (δ.+ sign.(δ)*1e-5) .* I(row_count)[:, crossing]
+    # E = (δ.+ sign.(δ)*1e-5) .* (@view I(row_count)[:, crossing])
     #∂Z_new = Zonotope([Ĝ E], ĉ)
     Z₁_new = L1(Z.Z₁,P;bounds = bounds₁)
     Z₂_new = L2(Z.Z₂,P;bounds = bounds₂)
     #println("Prop relu 8")
-    ∂Z_new = Zonotope(hcat(
-        Ĝ[:,1:input_dim+Z.num_approx₁],
-        zeros(Float64,(row_count,size(Z₁_new.G,2)-Z.num_approx₁-input_dim)),
-        Ĝ[:,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂],
-        zeros(Float64,(row_count,size(Z₂_new.G,2)-Z.num_approx₂-input_dim)),
-        Ĝ[:,input_dim+Z.num_approx₁+Z.num_approx₂+1:end],
-        E
-    ), ĉ)
+    Ĝ = Matrix{Float64}(undef,row_count, size(Z₁_new.G,2)+(size(Z₂_new.G,2)-input_dim)+Z.∂num_approx+num_crossing)
+    # Input space columns + approx columns of net 1
+    num_cols = (input_dim+Z.num_approx₁)
+    Z.∂Z.G .*= λ
+    Ĝ[:,1:num_cols] .= @view Z.∂Z.G[:,1:num_cols]
+    #Ĝ[:,1:num_cols] .*= λ
+    Ĝ[:,num_cols+1:size(Z₁_new.G,2)] .= 0.0
+
+    # Approx columns of net 2
+    if Z.num_approx₂ > 0
+        offset_cols = size(Z₁_new.G,2)+1
+        offset_cols_z = input_dim+Z.num_approx₁+1
+        num_cols = Z.num_approx₂-1
+        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= (@view Z.∂Z.G[:,offset_cols_z:(offset_cols_z+num_cols)])
+        #Ĝ[:,offset_cols:(offset_cols+num_cols)] .*= λ
+    end
+    range_start = size(Z₁_new.G,2)+Z.num_approx₂+1
+    range_end = size(Z₁_new.G,2)+size(Z₂_new.G,2)-input_dim
+    Ĝ[:,range_start:range_end] .= 0.0
+
+    # Approx columns of ∂
+    if Z.∂num_approx > 0
+        offset_cols = size(Z₁_new.G,2)+size(Z₂_new.G,2)-input_dim+1
+        offset_cols_z = input_dim+Z.num_approx₁+Z.num_approx₂+1
+        num_cols = Z.∂num_approx-1
+        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= (@view Z.∂Z.G[:,offset_cols_z:end])
+        #Ĝ[:,offset_cols:(offset_cols+num_cols)] .*= λ
+    end
+
+    # New Approx columns
+    offset_cols = size(Z₁_new.G,2)+size(Z₂_new.G,2)-input_dim+Z.∂num_approx+1
+    Ĝ[:,offset_cols:end] .= (δ.+ sign.(δ)*1e-5) .* (@view I(row_count)[:, crossing])
+
+    ∂Z_new = Zonotope(Ĝ, ĉ)
+
+    # ∂Z_new = Zonotope(hcat(
+    #     (@view Ĝ[:,1:input_dim+Z.num_approx₁]),
+    #     zeros(Float64,(row_count,size(Z₁_new.G,2)-Z.num_approx₁-input_dim)),
+    #     (@view Ĝ[:,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂]),
+    #     zeros(Float64,(row_count,size(Z₂_new.G,2)-Z.num_approx₂-input_dim)),
+    #     (@view Ĝ[:,input_dim+Z.num_approx₁+Z.num_approx₂+1:end]),
+    #     E
+    # ), ĉ)
     #println("Prop relu 9")
     # i=1
     # if size(∂lower,1)>=i
@@ -117,7 +147,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     #     println(∂Z_new.c[i])
     #     println(∂Z_new.G[i,:])
     # end
-    return DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,size(Z₁_new,2)-input_dim,size(Z₂_new,2)-input_dim,Z.∂num_approx+size(E,2))
+    return DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,size(Z₁_new,2)-input_dim,size(Z₂_new,2)-input_dim,Z.∂num_approx+num_crossing)
     #end
 end
 
