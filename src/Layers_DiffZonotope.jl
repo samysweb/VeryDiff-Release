@@ -72,7 +72,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     # Difference between N1 - N2
     # Case 0: Both instable
     # Case 1: N1 zero -> Δ = 0-max(0,x1 - Δᵢ) = 0 or Δᵢ - x1 >= Δᵢ
-    δ = 0.5*max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
+    δ = 0.5 .* max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
 
     γ = crossing .* (-δ .- λ .*∂lower ) # Decrease by ∂lower to ensure 0 reachable everywhere; decrease by 0.5*δ for approximation (additional dimension scaled by larger deviation)
     #println("Prop relu 5")
@@ -91,8 +91,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     Ĝ = Matrix{Float64}(undef,row_count, size(Z₁_new.G,2)+(size(Z₂_new.G,2)-input_dim)+Z.∂num_approx+num_crossing)
     # Input space columns + approx columns of net 1
     num_cols = (input_dim+Z.num_approx₁)
-    Z.∂Z.G .*= λ
-    Ĝ[:,1:num_cols] .= @view Z.∂Z.G[:,1:num_cols]
+    Ĝ[:,1:num_cols] .= λ .* (@view Z.∂Z.G[:,1:num_cols])
     #Ĝ[:,1:num_cols] .*= λ
     Ĝ[:,num_cols+1:size(Z₁_new.G,2)] .= 0.0
 
@@ -101,7 +100,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         offset_cols = size(Z₁_new.G,2)+1
         offset_cols_z = input_dim+Z.num_approx₁+1
         num_cols = Z.num_approx₂-1
-        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= (@view Z.∂Z.G[:,offset_cols_z:(offset_cols_z+num_cols)])
+        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= λ .* (@view Z.∂Z.G[:,offset_cols_z:(offset_cols_z+num_cols)])
         #Ĝ[:,offset_cols:(offset_cols+num_cols)] .*= λ
     end
     range_start = size(Z₁_new.G,2)+Z.num_approx₂+1
@@ -113,7 +112,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         offset_cols = size(Z₁_new.G,2)+size(Z₂_new.G,2)-input_dim+1
         offset_cols_z = input_dim+Z.num_approx₁+Z.num_approx₂+1
         num_cols = Z.∂num_approx-1
-        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= (@view Z.∂Z.G[:,offset_cols_z:end])
+        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= λ .* (@view Z.∂Z.G[:,offset_cols_z:end])
         #Ĝ[:,offset_cols:(offset_cols+num_cols)] .*= λ
     end
 

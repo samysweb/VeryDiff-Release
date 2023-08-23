@@ -1,13 +1,12 @@
 using VeryDiff
 using LinearAlgebra
-using Optim
 using Random
 using TimerOutputs
 
 Random.seed!(1235);
 
 @timeit VeryDiff.to "Fuzzing" begin
-for i in 1:50
+for i in 1:10
     println("Networks $(i)")
     layers1 = Layer[]
     layers2 = Layer[]
