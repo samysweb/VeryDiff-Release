@@ -2,7 +2,8 @@ function verify_network(
     N1 :: Network,
     N2 :: Network,
     bounds,
-    epsilon::Float64)
+    epsilon::Float64;
+    timeout=Inf)
     # Timing
     reset_timer!(to)
     @timeit to "Initialize" begin
@@ -49,16 +50,22 @@ function verify_network(
     @timeit to "Verify" begin
     if single_threaded
         worker_function(common_state, 1, prop_state,N,N1,N2,
-        epsilon,num_threads)
+        epsilon,num_threads;timeout=timeout)
     else
         worker_list = []
         for threadid in 1:(num_threads)
-            push!(worker_list,Threads.@spawn worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon,num_threads))
+            push!(worker_list,Threads.@spawn worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon,num_threads;timeout=timeout))
         end
         println("Thread $(Threads.threadid()) is waiting for termination of workers")
+        init_time = time_ns()
         while !common_state.should_exit
             #GC.safepoint()
             sleep(0.05)
+            if (time_ns()-init_time)/1e9 > timeout
+                println("\n\nTIMEOUT REACHED")
+                println("UNKNOWN")
+                invoke_termination(common_state)
+            end
             #println("Thread $(Threads.threadid()) is waiting for termination of workers $(worker_list)")
         end
         #worker_function(common_state, prop_state,N,N1,N2, epsilon)
@@ -73,9 +80,9 @@ function verify_network(
     #end
 end
 
-function worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads)
+function worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads;timeout=Inf)
     try
-        thread_result = @timed worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads)
+        thread_result = @timed worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads,timeout=timeout)
         println("[Thread $(threadid)] Finished in $(round(thread_result.time;digits=2))s")
         return thread_result.value
     catch e
@@ -83,7 +90,7 @@ function worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon, num
         showerror(stdout, e, catch_backtrace())
     end
 end
-function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads)
+function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads;timeout=Inf)
     # @debug "Worker initiated on thread $(threadid)"
     starttime = time_ns()
     prop_state = deepcopy(prop_state)
@@ -174,6 +181,11 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,eps
             wait_time += sync_res.time
             #end
         end
+        if (time_ns()-starttime)/1e9 > timeout
+            println("\n\nTIMEOUT REACHED")
+            println("UNKNOWN")
+            invoke_termination(common_state)
+        end
         k+=1
         if k%10000 == 0
             println("[Thread $(threadid)] Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=1))%)")
@@ -186,11 +198,12 @@ end
 
 function get_splitting(Zin,Zout,out_bounds,epsilon)
     #return @timeit to "Split_Heuristic"
+    input_dim = size(Zin.Z₁.G,1)
     return argmax(
         #max.(
         #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*Zout.∂Z.G[:,1:5],dims=1)[1,:],
         #.+
-        abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:5] .- Zout.Z₂.G[:,1:5] ),dims=1)[1,:]
+        abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
         #)
     )
 end
