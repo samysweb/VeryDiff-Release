@@ -18,10 +18,11 @@ function verify_network(
 
     # Initialize Zonotope
     #@timeit to "Zono_Init" begin
-    non_zero_distances = (distance.!=0)
-    Z_original1 = Zonotope(distance .* Matrix(I,input_dim,input_dim)[:,non_zero_distances],mid)
-    Z_original2 = deepcopy(Z_original1)
-    ∂Z_original = Zonotope(Matrix(0.0I,input_dim,size(Z_original1.G,2)),zeros(Float64,input_dim))
+    non_zero_indices = findall((!).(iszero.(distance)))
+    distance = distance[non_zero_indices]
+    #Z_original1 = Zonotope(distance .* Matrix(I,input_dim,input_dim)[:,non_zero_distances],mid)
+    #Z_original2 = deepcopy(Z_original1)
+    ∂Z_original = Zonotope(Matrix(0.0I,input_dim,size(non_zero_indices,1)),zeros(Float64,input_dim))
     #end
 
     #@timeit to "Network_Init" begin
@@ -40,12 +41,12 @@ function verify_network(
     println("Running with $(num_threads) threads")
     single_threaded = num_threads == 1
     if single_threaded
-        common_state = MultiThreaddedQueue(Tuple{Float64,DiffZonotope},1)
+        common_state = MultiThreaddedQueue(Tuple{Float64,VerificationTask},1)
     else
-        common_state = MultiThreaddedQueue(Tuple{Float64,DiffZonotope},num_threads)
+        common_state = MultiThreaddedQueue(Tuple{Float64,VerificationTask},num_threads)
     end
     push!(common_state.common_queue,
-        (1.0,DiffZonotope(Z_original1, Z_original2,deepcopy(∂Z_original),0,0,0))
+        (1.0,VerificationTask(mid, distance, non_zero_indices, ∂Z_original))
     )
     end
     @timeit to "Verify" begin
@@ -100,7 +101,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,eps
     generated_zonos = 0
     splits = 0
     # @debug "[Thread $(threadid)] Starting worker"
-    task_queue = Queue(Tuple{Float64,DiffZonotope})
+    task_queue = Queue(Tuple{Float64,VerificationTask})
     # @debug "[Thread $(threadid)] Syncing queues"
     should_terminate = sync_queues!(threadid, common_state, task_queue)
     sync_res = @timed sync_queues!(threadid, common_state, task_queue)
@@ -111,7 +112,8 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,eps
     loop_time = @elapsed begin
     while !should_terminate
         try
-            work_share, Zin = pop!(task_queue)
+            work_share, verification_task = pop!(task_queue)
+            Zin = to_diff_zono(verification_task)
             if k == 0
                 println("[Thread $(threadid)] Time to first task: $(round((time_ns()-starttime)/1e9;digits=2))s")
             end
@@ -155,7 +157,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,eps
                     splits += 1
                     split_d = get_splitting(Zin,Zout,out_bounds,epsilon;focus_dim=focus_dim)
                     
-                    Z1, Z2 = split_zono(split_d, Zin,work_share)
+                    Z1, Z2 = split_zono(split_d, verification_task,work_share)
                     Zin=nothing
                     push!(task_queue, Z1)
                     push!(task_queue, Z2)
@@ -210,38 +212,28 @@ function get_splitting(Zin,Zout,out_bounds,epsilon;focus_dim=nothing)
     # end
 end
 
-function split_zono(d2, Z, work_share)
+function split_zono(d, verification_task :: VerificationTask, work_share)
     #return @timeit to "Split_Zono" begin
-    Z1 = Z.Z₁
-    # println("d2: ", d2)
-    if size(Z1,1)==size(Z1,2)
-        d1 = d2
-    else
-        d1 = findfirst((!).(iszero.(@view Z1.G[:,d2])))
-        if isnothing(d1)
-            print(Z1.G[:,d2])
-        end
-        @assert all(iszero.(Z1.G[(d1+1):end,d2])) "Currently only supporting input Zonotopes with standard base generators (each column may only have one non-zero cell)"
-    end
-    low = Z1.c[d1] - Z1.G[d1,d2]
-    high = Z1.c[d1] + Z1.G[d1,d2]
-    mid = (high+low)/2
+    distance_d = d # findfirst(x->x==d,verification_task.distance_indices)
+    low = verification_task.middle[d]-verification_task.distance[distance_d]
+    high = verification_task.middle[d]+verification_task.distance[distance_d]
+    mid = verification_task.middle[d]
     mid1 = (low+mid)/2
     distance1 = mid1-low
-    # print("Task 1: ")
-    # print(distance1)
-    Z1.G[d1,d2] = distance1
-    Z1.c[d1] = mid1
-    Z1 = DiffZonotope(Z1,deepcopy(Z1),deepcopy(Z.∂Z),0,0,0)
+    distance1_vec = deepcopy(verification_task.distance)
+    distance1_vec[distance_d] = distance1
+    middle1_vec = deepcopy(verification_task.middle)
+    middle1_vec[d] = mid1
 
-    Z2 = Z.Z₂
+    Z1 = VerificationTask(middle1_vec, distance1_vec, verification_task.distance_indices, deepcopy(verification_task.∂Z))
+
     mid2 = (mid+high)/2
     distance2 = mid2-mid
-    #print("Task 2: ")
-    #println(distance2)
-    Z2.G[d1,d2] = distance2
-    Z2.c[d1] = mid2
-    Z2 = DiffZonotope(Z2,deepcopy(Z2),Z.∂Z,0,0,0)
+    distance2_vec = verification_task.distance
+    distance2_vec[distance_d] = distance2
+    middle2_vec = verification_task.middle
+    middle2_vec[d] = mid2
+    Z2 = VerificationTask(middle2_vec, distance2_vec, verification_task.distance_indices, verification_task.∂Z)
 
     return (work_share/2.0,Z1), (work_share/2.0,Z2)
     #end

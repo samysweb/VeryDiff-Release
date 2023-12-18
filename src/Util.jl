@@ -18,3 +18,10 @@ function truncate_network(T::Type,N::Network)
     end
     return Network(layers)
 end
+
+function to_diff_zono(task :: VerificationTask)
+    input_dim = size(task.middle,1)
+    Z1 = Zonotope(Matrix(I, input_dim, input_dim)[:,task.distance_indices] .* task.distance', task.middle)
+    Z2 = deepcopy(Z1)
+    return DiffZonotope(Z1, Z2, task.∂Z, 0, 0, 0)
+end

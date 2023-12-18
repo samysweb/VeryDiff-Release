@@ -3,6 +3,13 @@ mutable struct Zonotope
     c::Vector{Float64}
 end
 
+struct VerificationTask
+    middle :: Vector{Float64}
+    distance :: Vector{Float64}
+    distance_indices :: Vector{Int}
+    ∂Z::Zonotope
+end
+
 mutable struct DiffZonotope
     Z₁::Zonotope
     Z₂::Zonotope
