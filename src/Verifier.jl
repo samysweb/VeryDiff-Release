@@ -18,9 +18,10 @@ function verify_network(
 
     # Initialize Zonotope
     #@timeit to "Zono_Init" begin
-    Z_original1 = Zonotope(distance .* Matrix(I,input_dim,input_dim),mid)
+    non_zero_distances = (distance.!=0)
+    Z_original1 = Zonotope(distance .* Matrix(I,input_dim,input_dim)[:,non_zero_distances],mid)
     Z_original2 = deepcopy(Z_original1)
-    ∂Z_original = Zonotope(Matrix(0.0I,input_dim,input_dim),zeros(Float64,input_dim))
+    ∂Z_original = Zonotope(Matrix(0.0I,input_dim,size(Z_original1.G,2)),zeros(Float64,input_dim))
     #end
 
     #@timeit to "Network_Init" begin
@@ -189,7 +190,7 @@ end
 
 function get_splitting(Zin,Zout,out_bounds,epsilon;focus_dim=nothing)
     #return @timeit to "Split_Heuristic"
-    input_dim = size(Zin.Z₁.G,1)
+    input_dim = size(Zin.Z₁.G,2)
     if isnothing(focus_dim)
         return argmax(
             #max.(
@@ -209,23 +210,29 @@ function get_splitting(Zin,Zout,out_bounds,epsilon;focus_dim=nothing)
     end
 end
 
-function split_zono(d, Z, work_share)
+function split_zono(d2, Z, work_share)
     #return @timeit to "Split_Zono" begin
     Z1 = Z.Z₁
-    low = Z1.c[d] - Z1.G[d,d]
-    high = Z1.c[d] + Z1.G[d,d]
+    if size(Z1,1)==size(Z1,2)
+        d1 = d2
+    else
+        d1 = findfirst((!).(iszero.(Z1.G[:,d2])))
+        @assert all(iszero.(Z1.G[(d1+1):end,d2])) "Currently only supporting input Zonotopes with standard base generators (each column may only have one non-zero cell)"
+    end
+    low = Z1.c[d1] - Z1.G[d1,d2]
+    high = Z1.c[d1] + Z1.G[d1,d2]
     mid = (high+low)/2
     mid1 = (low+mid)/2
     distance1 = mid1-low
-    Z1.G[d,d] = distance1
-    Z1.c[d] = mid1
+    Z1.G[d1,d2] = distance1
+    Z1.c[d1] = mid1
     Z1 = DiffZonotope(Z1,deepcopy(Z1),deepcopy(Z.∂Z),0,0,0)
 
     Z2 = Z.Z₂
     mid2 = (mid+high)/2
     distance2 = mid2-mid
-    Z2.G[d,d] = distance2
-    Z2.c[d] = mid2
+    Z2.G[d1,d2] = distance2
+    Z2.c[d1] = mid2
     Z2 = DiffZonotope(Z2,deepcopy(Z2),Z.∂Z,0,0,0)
 
     return (work_share/2.0,Z1), (work_share/2.0,Z2)
