@@ -191,32 +191,36 @@ end
 function get_splitting(Zin,Zout,out_bounds,epsilon;focus_dim=nothing)
     #return @timeit to "Split_Heuristic"
     input_dim = size(Zin.Z₁.G,2)
-    if isnothing(focus_dim)
+    #if isnothing(focus_dim)
         return argmax(
             #max.(
             #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*Zout.∂Z.G[:,1:5],dims=1)[1,:],
             #.+
-            abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+            abs.(sum(Zin.Z₁.G,dims=1)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
             #)
-        )
-    else
-        return argmax(
-            #max.(
-            #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*Zout.∂Z.G[:,1:5],dims=1)[1,:],
-            #.+
-            abs.(diag(Zin.Z₁.G)).*abs.(Zout.Z₁.G[focus_dim,1:input_dim] .- Zout.Z₂.G[focus_dim,1:input_dim] )
-            #)
-        )
-    end
+        )[1]
+    # else
+    #     return argmax(
+    #         #max.(
+    #         #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*Zout.∂Z.G[:,1:5],dims=1)[1,:],
+    #         #.+
+    #         abs.(sum(Zin.Z₁.G,dims=1)).*abs.(Zout.Z₁.G[focus_dim,1:input_dim] .- Zout.Z₂.G[focus_dim,1:input_dim] )
+    #         #)
+    #     )[1]
+    # end
 end
 
 function split_zono(d2, Z, work_share)
     #return @timeit to "Split_Zono" begin
     Z1 = Z.Z₁
+    # println("d2: ", d2)
     if size(Z1,1)==size(Z1,2)
         d1 = d2
     else
-        d1 = findfirst((!).(iszero.(Z1.G[:,d2])))
+        d1 = findfirst((!).(iszero.(@view Z1.G[:,d2])))
+        if isnothing(d1)
+            print(Z1.G[:,d2])
+        end
         @assert all(iszero.(Z1.G[(d1+1):end,d2])) "Currently only supporting input Zonotopes with standard base generators (each column may only have one non-zero cell)"
     end
     low = Z1.c[d1] - Z1.G[d1,d2]
@@ -224,6 +228,8 @@ function split_zono(d2, Z, work_share)
     mid = (high+low)/2
     mid1 = (low+mid)/2
     distance1 = mid1-low
+    # print("Task 1: ")
+    # print(distance1)
     Z1.G[d1,d2] = distance1
     Z1.c[d1] = mid1
     Z1 = DiffZonotope(Z1,deepcopy(Z1),deepcopy(Z.∂Z),0,0,0)
@@ -231,6 +237,8 @@ function split_zono(d2, Z, work_share)
     Z2 = Z.Z₂
     mid2 = (mid+high)/2
     distance2 = mid2-mid
+    #print("Task 2: ")
+    #println(distance2)
     Z2.G[d1,d2] = distance2
     Z2.c[d1] = mid2
     Z2 = DiffZonotope(Z2,deepcopy(Z2),Z.∂Z,0,0,0)
