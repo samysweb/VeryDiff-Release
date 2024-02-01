@@ -35,6 +35,11 @@ function verify_network(
     total_zonos = 1
     #end
 
+    # Property
+    #property_check = get_epsilon_property(epsilon;focus_dim=focus_dim)
+    property_check = get_top1_property(1.0)
+    split_heuristic = top1_split_heuristic #epsilon_split_heuristic
+
     #Config
     prop_state = PropState(true)
     num_threads = Threads.nthreads()
@@ -52,39 +57,33 @@ function verify_network(
     @timeit to "Verify" begin
     if single_threaded
         worker_function(common_state, 1, prop_state,N,N1,N2,
-        epsilon,num_threads;timeout=timeout,focus_dim=focus_dim)
+        property_check, split_heuristic,num_threads;timeout=timeout)
     else
         worker_list = []
         for threadid in 1:(num_threads)
-            push!(worker_list,Threads.@spawn worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon,num_threads;timeout=timeout,focus_dim=focus_dim))
+            push!(worker_list,Threads.@spawn worker_function(common_state, threadid, prop_state,N,N1,N2,property_check, split_heuristic,num_threads;timeout=timeout))
         end
         println("Thread $(Threads.threadid()) is waiting for termination of workers")
         init_time = time_ns()
         while !common_state.should_exit
-            #GC.safepoint()
             sleep(0.05)
             if (time_ns()-init_time)/1e9 > timeout
                 println("\n\nTIMEOUT REACHED")
                 println("UNKNOWN")
                 invoke_termination(common_state)
             end
-            #println("Thread $(Threads.threadid()) is waiting for termination of workers $(worker_list)")
         end
-        #worker_function(common_state, prop_state,N,N1,N2, epsilon)
         for w in worker_list
             wait(w)
         end
-        #println(worker_list)
     end
     end
-    #worker_function(common_state, prop_state,N,N1,N2, epsilon)
     show(to)
-    #end
 end
 
-function worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads;timeout=Inf,focus_dim=nothing)
+function worker_function(common_state, threadid, prop_state,N,N1,N2,property_check, split_heuristic, num_threads;timeout=Inf)
     try
-        thread_result = @timed worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads,timeout=timeout,focus_dim=focus_dim)
+        thread_result = @timed worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num_threads, property_check, split_heuristic, timeout=timeout)
         println("[Thread $(threadid)] Finished in $(round(thread_result.time;digits=2))s")
         return thread_result.value
     catch e
@@ -92,7 +91,7 @@ function worker_function(common_state, threadid, prop_state,N,N1,N2,epsilon, num
         showerror(stdout, e, catch_backtrace())
     end
 end
-function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,epsilon, num_threads;timeout=Inf,focus_dim=nothing)
+function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num_threads, property_check, split_heuristic ;timeout=Inf)
     # @debug "Worker initiated on thread $(threadid)"
     starttime = time_ns()
     prop_state = deepcopy(prop_state)
@@ -124,45 +123,20 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,eps
             #prop_state.i = 1
             #@timeit to "NetworkProp" 
             Zout = N(Zin, prop_state)
-            #println("Propagated Zonotope on thread $(threadid)")
-            # First round?
-            out_bounds = zono_bounds(Zout.∂Z)
-            if isone(work_share)
-                # Print out initial bounds
-                println("[",join([x for x in out_bounds[:,1]],","),"]")
-                println("[",join([x for x in out_bounds[:,2]],","),"]")
-            end
-            #prop_state.first = false
-            # Larger than epsilon?
-            #@timeit to "PostProp" begin
-            distance_bound = if !isnothing(focus_dim)
-                    maximum(abs.(out_bounds[focus_dim,:]))
-                else
-                    maximum(abs.(out_bounds))
-                end
-            #println("Distance ($focus_dim): $(distance_bound)")
-            if distance_bound > epsilon
-                #println("Splitting on thread $(threadid)")
-                # Is concrete example larger than epsilon?
-                sample_distance = if !isnothing(focus_dim)
-                    abs.(N1(Zin.Z₁.c)[focus_dim]-N2(Zin.Z₂.c)[focus_dim])
-                else
-                    maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₂.c)))
-                end
-                if sample_distance>epsilon
-                    # Concrete example is larger than epsilon
-                    println("\nFound counterexample: $(Zin.Z₁.c): Distance $(sample_distance)")
+
+            prop_satisfied, cex, heuristics_info = property_check(N1, N2, Zin, Zout)
+            if !prop_satisfied
+                if !isnothing(cex)
+                    println("\nFound counterexample: $(cex)")
                     invoke_termination(common_state)
                 else
                     splits += 1
-                    split_d = get_splitting(Zin,Zout,out_bounds,epsilon;focus_dim=focus_dim)
-                    
+                    split_d = split_heuristic(Zin,Zout,heuristics_info)
                     Z1, Z2 = split_zono(split_d, verification_task,work_share)
                     Zin=nothing
                     push!(task_queue, Z1)
                     push!(task_queue, Z2)
                     generated_zonos+=2
-                    #end
                 end
             else
                 total_work += work_share
@@ -190,28 +164,6 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,eps
     print("Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=1))%); Generated $(generated_zonos) (Waited $(round(wait_time;digits=2))s; $(loop_time/k)s/loop)\n")
 end
 
-function get_splitting(Zin,Zout,out_bounds,epsilon;focus_dim=nothing)
-    #return @timeit to "Split_Heuristic"
-    input_dim = size(Zin.Z₁.G,2)
-    #if isnothing(focus_dim)
-        return argmax(
-            #max.(
-            #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*Zout.∂Z.G[:,1:5],dims=1)[1,:],
-            #.+
-            abs.(sum(Zin.Z₁.G,dims=1)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
-            #)
-        )[1]
-    # else
-    #     return argmax(
-    #         #max.(
-    #         #abs.(diag(Zin.Z₁.G)).*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*Zout.∂Z.G[:,1:5],dims=1)[1,:],
-    #         #.+
-    #         abs.(sum(Zin.Z₁.G,dims=1)).*abs.(Zout.Z₁.G[focus_dim,1:input_dim] .- Zout.Z₂.G[focus_dim,1:input_dim] )
-    #         #)
-    #     )[1]
-    # end
-end
-
 function split_zono(d, verification_task :: VerificationTask, work_share)
     #return @timeit to "Split_Zono" begin
     distance_d = d # findfirst(x->x==d,verification_task.distance_indices)
@@ -236,5 +188,4 @@ function split_zono(d, verification_task :: VerificationTask, work_share)
     Z2 = VerificationTask(middle2_vec, distance2_vec, verification_task.distance_indices, verification_task.∂Z)
 
     return (work_share/2.0,Z1), (work_share/2.0,Z2)
-    #end
 end

@@ -10,6 +10,8 @@ struct VerificationTask
     ∂Z::Zonotope
 end
 
+# Z₂ = Z₁ - ∂Z
+
 mutable struct DiffZonotope
     Z₁::Zonotope
     Z₂::Zonotope

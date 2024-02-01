@@ -22,6 +22,9 @@ import Zygote.ChainRulesCore.rrule
 using TimerOutputs
 const to = TimerOutput()
 
+using Enzyme
+using NLSolvers
+
 include("Definitions.jl")
 include("Util.jl")
 include("Network.jl")
@@ -29,6 +32,7 @@ include("Zonotope.jl")
 include("Layers_Zonotope.jl")
 include("Layers_DiffZonotope.jl")
 include("MultiThreadding.jl")
+include("Properties.jl")
 include("Verifier.jl")
 
 export Network,GeminiNetwork,Layer,Dense,ReLU,WrappedReLU
