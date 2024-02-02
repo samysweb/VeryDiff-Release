@@ -76,9 +76,9 @@ function get_top1_property()
             end
             # generator_importance .*= sum(abs,Zin.Z₁.G,dims=1)[1,:]
         end
-        if property_satisfied
-            println("Zonotope Top 1 Equivalent!")
-        end
+        # if property_satisfied
+        #     println("Zonotope Top 1 Equivalent!")
+        # end
         return property_satisfied, nothing, (top_dimension_importance,other_dimension_importance), verification_status
     end
 end
