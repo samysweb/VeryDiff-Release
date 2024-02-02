@@ -27,6 +27,13 @@ const to = TimerOutput()
 
 using JuMP
 using GLPK
+using Gurobi
+
+const GRB_ENV = Ref{Any}(nothing)
+
+function __init__()
+    GRB_ENV[] = Gurobi.Env()
+end
 
 include("Definitions.jl")
 include("Util.jl")

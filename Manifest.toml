@@ -2,7 +2,7 @@
 
 julia_version = "1.9.3"
 manifest_format = "2.0"
-project_hash = "e1b143eb41f014936479079a87dc07c5e71c6ee6"
+project_hash = "3ef06fb6f543aed6d1e887c88ce74f7349e0c4f5"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -282,6 +282,15 @@ deps = ["ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "TimerOutpu
 git-tree-sha1 = "19d693666a304e8c371798f4900f7435558c7cde"
 uuid = "61eb1bfa-7361-4325-ad38-22787b887f55"
 version = "0.17.3"
+
+[[deps.Gurobi]]
+deps = ["LazyArtifacts", "Libdl", "MathOptInterface"]
+git-tree-sha1 = "4eeaeedbf15597c40e5e1b7d1d65849c3096854a"
+pinned = true
+repo-rev = "v1.0.2"
+repo-url = "https://github.com/jump-dev/Gurobi.jl.git"
+uuid = "2e9cd046-0924-5485-92f1-d5272153d98b"
+version = "1.0.2"
 
 [[deps.IRTools]]
 deps = ["InteractiveUtils", "MacroTools", "Test"]
