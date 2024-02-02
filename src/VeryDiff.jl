@@ -22,8 +22,11 @@ import Zygote.ChainRulesCore.rrule
 using TimerOutputs
 const to = TimerOutput()
 
-using Enzyme
-using NLSolvers
+#using Enzyme
+#using NLSolvers
+
+using JuMP
+using GLPK
 
 include("Definitions.jl")
 include("Util.jl")
@@ -40,5 +43,7 @@ export parse_network
 export Zonotope, DiffZonotope, PropState
 export zono_optimize, zono_bounds
 export verify_network
+export get_epsilon_property, epsilon_split_heuristic
+export get_top1_property, top1_configure_split_heuristic
 
 end # module AlphaZono

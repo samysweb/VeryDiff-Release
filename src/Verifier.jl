@@ -2,8 +2,9 @@ function verify_network(
     N1 :: Network,
     N2 :: Network,
     bounds,
-    epsilon::Float64;
-    timeout=Inf,focus_dim=nothing)
+    property_check,
+    split_heuristic;
+    timeout=Inf)
     # Timing
     reset_timer!(to)
     @timeit to "Initialize" begin
@@ -36,9 +37,10 @@ function verify_network(
     #end
 
     # Property
-    #property_check = get_epsilon_property(epsilon;focus_dim=focus_dim)
-    property_check = get_top1_property(1.0)
-    split_heuristic = top1_split_heuristic #epsilon_split_heuristic
+    # property_check = get_epsilon_property(epsilon;focus_dim=focus_dim)
+    # split_heuristic = epsilon_split_heuristic
+    # property_check = get_top1_property(1.0)
+    # split_heuristic = top1_configure_split_heuristic(3) #epsilon_split_heuristic
 
     #Config
     prop_state = PropState(true)
@@ -51,7 +53,7 @@ function verify_network(
         common_state = MultiThreaddedQueue(Tuple{Float64,VerificationTask},num_threads)
     end
     push!(common_state.common_queue,
-        (1.0,VerificationTask(mid, distance, non_zero_indices, ∂Z_original))
+        (1.0,VerificationTask(mid, distance, non_zero_indices, ∂Z_original, nothing))
     )
     end
     @timeit to "Verify" begin
@@ -124,7 +126,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             #@timeit to "NetworkProp" 
             Zout = N(Zin, prop_state)
 
-            prop_satisfied, cex, heuristics_info = property_check(N1, N2, Zin, Zout)
+            prop_satisfied, cex, heuristics_info, verification_status = property_check(N1, N2, Zin, Zout, verification_task.verification_status)
             if !prop_satisfied
                 if !isnothing(cex)
                     println("\nFound counterexample: $(cex)")
@@ -132,7 +134,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
                 else
                     splits += 1
                     split_d = split_heuristic(Zin,Zout,heuristics_info)
-                    Z1, Z2 = split_zono(split_d, verification_task,work_share)
+                    Z1, Z2 = split_zono(split_d, verification_task,work_share,verification_status)
                     Zin=nothing
                     push!(task_queue, Z1)
                     push!(task_queue, Z2)
@@ -154,8 +156,8 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             invoke_termination(common_state)
         end
         k+=1
-        if k%100 == 0
-            println("[Thread $(threadid)] Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=1))%)")
+        if true #k%100 == 0
+            println("[Thread $(threadid)] Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=5))%; Expected Zonos: $(total_zonos/total_work))")
         end
         #end
     end
@@ -164,7 +166,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
     print("Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=1))%); Generated $(generated_zonos) (Waited $(round(wait_time;digits=2))s; $(loop_time/k)s/loop)\n")
 end
 
-function split_zono(d, verification_task :: VerificationTask, work_share)
+function split_zono(d, verification_task :: VerificationTask, work_share, verification_status)
     #return @timeit to "Split_Zono" begin
     distance_d = d # findfirst(x->x==d,verification_task.distance_indices)
     low = verification_task.middle[d]-verification_task.distance[distance_d]
@@ -177,7 +179,7 @@ function split_zono(d, verification_task :: VerificationTask, work_share)
     middle1_vec = deepcopy(verification_task.middle)
     middle1_vec[d] = mid1
 
-    Z1 = VerificationTask(middle1_vec, distance1_vec, verification_task.distance_indices, deepcopy(verification_task.∂Z))
+    Z1 = VerificationTask(middle1_vec, distance1_vec, verification_task.distance_indices, deepcopy(verification_task.∂Z), verification_status)
 
     mid2 = (mid+high)/2
     distance2 = mid2-mid
@@ -185,7 +187,7 @@ function split_zono(d, verification_task :: VerificationTask, work_share)
     distance2_vec[distance_d] = distance2
     middle2_vec = verification_task.middle
     middle2_vec[d] = mid2
-    Z2 = VerificationTask(middle2_vec, distance2_vec, verification_task.distance_indices, verification_task.∂Z)
+    Z2 = VerificationTask(middle2_vec, distance2_vec, verification_task.distance_indices, verification_task.∂Z, deepcopy(verification_status))
 
     return (work_share/2.0,Z1), (work_share/2.0,Z2)
 end
