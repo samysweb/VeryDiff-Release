@@ -154,6 +154,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             println("\n\nTIMEOUT REACHED")
             println("UNKNOWN")
             invoke_termination(common_state)
+            should_terminate = true
         end
         k+=1
         if k%100 == 0

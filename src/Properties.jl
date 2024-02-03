@@ -54,6 +54,7 @@ function get_top1_property()
             # Processed 1973 zonotopes (Work Done: 100.0%); Generated 1972 (Waited 0.0s; 0.014410304252407502s/loop)
             # [Thread 1] Finished in 28.43s
                 #set_attribute(model, "NumericFocus", 2)
+            set_time_limit_sec(model, 10)
             @variable(model,-1.0 <= x[1:size(Zout.∂Z.G,2)] <= 1.0)
             @constraint(model,G1*x[1:size(Zout.Z₁.G,2)] .<= c1)
             @objective(model,Max,0)
@@ -72,6 +73,12 @@ function get_top1_property()
                         optimize!(model)
                         threshold = Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
                         @assert termination_status(model) != MOI.INFEASIBLE
+                        if termination_status(model) != MOI.OPTIMAL
+                                top_dimension_importance[top_index] += 1
+                                other_dimension_importance[other_index] + 1
+                                property_satisfied = false
+                                continue
+                        end
                         if objective_value(model) < threshold
                             verification_status[(top_index,other_index)]=true
                         else
