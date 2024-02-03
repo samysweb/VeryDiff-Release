@@ -44,12 +44,14 @@ function get_top1_property()
             # TODO: Construct LP that ensures that top_index is maximal in N1
             G1 = Zout.Z₁.G .- Zout.Z₁.G[top_index:top_index,:]
             c1 = Zout.Z₁.c[top_index] .- Zout.Z₁.c
-            model = Model(GLPK.Optimizer)
+            #model = Model(GLPK.Optimizer)
             # GLPK:
             # Processed 1973 zonotopes (Work Done: 100.0%); Generated 1972 (Waited 0.0s; 0.011900008664977191s/loop)
             # [Thread 1] Finished in 23.48s
-            # model = Model(() -> Gurobi.Optimizer(GRB_ENV[]))
-            # set_attribute(model, "OutputFlag", 0)
+            # set_attribute(GRB_ENV[], "LogToConsole", 0)
+            # set_attribute(GRB_ENV[], "OutputFlag", 0)
+            # set_attribute(GRB_ENV[], "Method", 1)
+            model = Model(() -> Gurobi.Optimizer(GRB_ENV[]))
             # Gurobi: 
             # Processed 1973 zonotopes (Work Done: 100.0%); Generated 1972 (Waited 0.0s; 0.014410304252407502s/loop)
             # [Thread 1] Finished in 28.43s
@@ -58,7 +60,9 @@ function get_top1_property()
             @variable(model,-1.0 <= x[1:size(Zout.∂Z.G,2)] <= 1.0)
             @constraint(model,G1*x[1:size(Zout.Z₁.G,2)] .<= c1)
             @objective(model,Max,0)
+            #print("Calling GLPK (timeout=$(time_limit_sec(model)))")
             optimize!(model)
+            #print("Returning from GLPK")
             
             if termination_status(model) == MOI.INFEASIBLE
                 for other_index in 1:size(Zout.Z₁,1)
@@ -70,7 +74,9 @@ function get_top1_property()
                         a = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
                         a[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
                         @objective(model,Max,a'*x)
+                        # print("Calling GLPK (timeout=$(time_limit_sec(model)))")
                         optimize!(model)
+                        # print("Returning from GLPK")
                         threshold = Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
                         @assert termination_status(model) != MOI.INFEASIBLE
                         if termination_status(model) != MOI.OPTIMAL
