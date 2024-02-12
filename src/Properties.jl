@@ -24,7 +24,7 @@ function get_epsilon_property(epsilon;focus_dim=nothing)
     end
 end
 
-function get_top1_property()
+function get_top1_property(;scale=one(Float64))
     return (N1, N2, Zin, Zout, verification_status) -> begin
         if isnothing(verification_status)
             verification_status = Dict{Tuple{Int,Int},Bool}()
@@ -40,10 +40,41 @@ function get_top1_property()
             return false, (Zin.Z₁.c, (argmax_N1, argmax_N2)), nothing, nothing
         end
         property_satisfied = true
+        # Formulation of "Description of Z₁-∂Z = Z₂" in LP:
+        #
+        # n2_G = -Zout.∂Z.G
+        # n2_G[:,1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G
+        # n2_G[:,1:input_dim] .-= Zout.Z₂.G[:,1:input_dim]
+        # z2_approx_start = (size(Zout.Z₁.G,2)+1)
+        # z2_approx_end = z2_approx_start + Zout.num_approx₂ - 1
+        # n2_G[:,z2_approx_start:z2_approx_end] .-= Zout.Z₂.G[:,(input_dim+1):end]
+        # n2_c = -(Zout.Z₁.c .- Zout.∂Z.c) + Zout.Z₂.c
+
+        # δ-Top-1 property
+        #out_bounds = zono_bounds(Zout.Z₁)
+        #dist=log(0.1)+log(sum(exp.(out_bounds[:,1])))
+        #print(out_bounds[:,1])
+        #print("Distance: ",dist)
+        if !isone(scale)
+            dist=log(scale)
+        else
+            dist=0.0
+        end
+
         for top_index in 1:size(Zout.Z₁,1)
             # TODO: Construct LP that ensures that top_index is maximal in N1
             G1 = Zout.Z₁.G .- Zout.Z₁.G[top_index:top_index,:]
             c1 = Zout.Z₁.c[top_index] .- Zout.Z₁.c
+
+            # Second formulation of "top_index is maximal in N1":
+            #
+            # G2 = deepcopy(Zout.∂Z.G)
+            # G2[:,1:input_dim] .+= Zout.Z₂.G[:,1:input_dim]
+            # G2[:,z2_approx_start:z2_approx_end] .+= Zout.Z₂.G[:,(input_dim+1):end]
+            # G2 .-= G2[top_index:top_index,:]
+            # c2 = (Zout.∂Z.c[top_index] .+ Zout.Z₂.c[top_index]) .- (Zout.∂Z.c .+ Zout.Z₂.c)
+
+            
             #model = Model(GLPK.Optimizer)
             # GLPK:
             # Processed 1973 zonotopes (Work Done: 100.0%); Generated 1972 (Waited 0.0s; 0.011900008664977191s/loop)
@@ -58,17 +89,28 @@ function get_top1_property()
                 #set_attribute(model, "NumericFocus", 2)
             set_time_limit_sec(model, 10)
             @variable(model,-1.0 <= x[1:size(Zout.∂Z.G,2)] <= 1.0)
-            @constraint(model,G1*x[1:size(Zout.Z₁.G,2)] .<= c1)
+            @constraint(model,G1[1:end .!= top_index,:]*x[1:size(Zout.Z₁.G,2)] .<= (c1[1:end .!= top_index] .-dist))
+            
+            # Additional (but not that helpful) constraints
+            #@constraint(model,G2*x .<= c2)
+            #@constraint(model, n2_G*x == n2_c)
+            
+            
             @objective(model,Max,0)
+            
+            #@objective(model, Max, sum(Zout.Z₁.G*x[1:size(Zout.Z₁.G,2)]+Zout.Z₁.c,dim=2))
+            
             #print("Calling GLPK (timeout=$(time_limit_sec(model)))")
             optimize!(model)
             #print("Returning from GLPK")
             
             if termination_status(model) == MOI.INFEASIBLE
+                #println("$top_index INFEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
                     verification_status[(top_index,other_index)]=true
                 end
             else
+                #println("FEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
                     if other_index != top_index && !haskey(verification_status, (top_index,other_index))
                         a = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
@@ -89,11 +131,25 @@ function get_top1_property()
                             verification_status[(top_index,other_index)]=true
                         else
                             input = Zin.Z₁.G*value.(x[1:input_dim])+Zin.Z₁.c
-                            argmax_N1 = argmax(N1(input))
-                            argmax_N2 = argmax(N2(input))
+                            res1 = N1(input)
+                            res2 = N2(input)
+                            argmax_N1 = argmax(res1)
+                            argmax_N2 = argmax(res2)
+                            softmax_N1 = exp.(res1)/sum(exp.(res1))
+                            second_most = maximum(softmax_N1[1:end .!= argmax_N1])
                             if argmax_N1 != argmax_N2
-                                print("Found cex")
-                                return false, (input, (argmax_N1, argmax_N2)), nothing, nothing
+                                println("Found cex")
+                                #println("N1: $(softmax_N1[argmax_N1]) (vs. $second_most)")
+                                #println("N2: $(softmax_N1[argmax_N2])")
+                                if isone(scale) || abs(softmax_N1[argmax_N1]/second_most) >= scale
+                                    println("N1 Scale: $(softmax_N1[argmax_N1]/second_most) >= $scale")
+                                    return false, (input, (argmax_N1, argmax_N2)), nothing, nothing
+                                else
+                                    println("Discared cex due to scale ($(softmax_N1[argmax_N1]/second_most) < $scale)")
+                                    top_dimension_importance[top_index] += 1
+                                    other_dimension_importance[other_index] + 1
+                                    property_satisfied = false
+                                end
                             else
                                 #generator_importance .= max.(generator_importance, abs.(a[1:input_dim]))
                                 top_dimension_importance[top_index] += 1
