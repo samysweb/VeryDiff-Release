@@ -194,7 +194,14 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info)
     epsilon = heuristics_info[2]
     focus_dim = heuristics_info[3]
     input_dim = size(Zin.Z₁.G,2)
-    return argmax(
+    res = argmax(
         sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
     )[1]
+    #println(out_bounds)
+    #println((Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ))
+    #println(sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:])
+    #println(sum(abs,Zin.Z₁.G,dims=1)[1,:])
+    #println(res)
+    #println("--------------------------------------------------")
+    return res
 end

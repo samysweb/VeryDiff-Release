@@ -35,16 +35,46 @@ function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P
     #end
 end
 
+function two_generator_bound(G::Matrix{Float64}, b, H::Matrix{Float64})
+    @assert size(G,1) == size(H,1) && size(G,2) == size(H,2)
+    return [sum(j->abs(G[i,j]+b*H[i,j]),1:size(G,2)) for i in 1:size(G,1)]
+end
+
 function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::PropState)
     #println("Prop relu")
     #return @timeit to "DiffZonotope_DenseProp" begin
     #println("ReLU")
-    L1, _, L2 = Ls
-    bounds₁ = zono_bounds(Z.Z₁)
-    bounds₂ = zono_bounds(Z.Z₂)
-    ∂bounds = zono_bounds(Z.∂Z)
     input_dim = size(Z.Z₂,2)-Z.num_approx₂
     output_dim = size(Z.Z₂,1)
+
+    L1, _, L2 = Ls
+
+    offset_∂approx = input_dim + Z.num_approx₁ + Z.num_approx₂ + 1
+
+    bounds₁₁ = zono_bounds(Z.Z₁)
+    # Compute alternate version of bounds for Z₁ using Z₂ and ∂Z
+    b1 = two_generator_bound(Z.Z₂.G[:,1:input_dim], 1.0, Z.∂Z.G[:,1:input_dim])
+    if Z.num_approx₂ > 0
+        range_start = input_dim + Z.num_approx₁ + 1
+        range_end = input_dim + Z.num_approx₁ + Z.num_approx₂
+        b1 .+= two_generator_bound(Z.Z₂.G[:,(input_dim+1):end], 1.0, Z.∂Z.G[:,range_start:range_end])
+    end
+    if Z.∂num_approx > 0
+        b1 .+= sum(abs, Z.∂Z.G[:,offset_∂approx:end], dims=2)
+    end
+    bounds₁₂ = [(Z.Z₂.c + Z.∂Z.c).-b1 b1.+(Z.Z₂.c + Z.∂Z.c)]
+    bounds₁ = bounds₁₁
+    #bounds₁ = [max.(bounds₁₁[:,1],bounds₁₂[:,1]) min.(bounds₁₁[:,2],bounds₁₂[:,2])]
+
+    b2 = two_generator_bound(Z.Z₁.G[:,1:end], -1.0, Z.∂Z.G[:,1:(input_dim+Z.num_approx₁)])
+    if Z.∂num_approx > 0
+        b2 .+= sum(abs, Z.∂Z.G[:,offset_∂approx:end], dims=2)
+    end
+    bounds₂₁ = [(Z.Z₁.c - Z.∂Z.c).-b2 b2.+(Z.Z₁.c - Z.∂Z.c)]
+    bounds₂₂ = zono_bounds(Z.Z₂)
+    bounds₂ = bounds₂₂
+    #bounds₂ = [max.(bounds₂₁[:,1],bounds₂₂[:,1]) min.(bounds₂₁[:,2],bounds₂₂[:,2])]
+    ∂bounds = zono_bounds(Z.∂Z)
     #println("Prop relu 1")
     lower₁ = @view bounds₁[:,1]
     upper₁ = @view bounds₁[:,2]
@@ -69,6 +99,8 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         for (l1, u1, l2, u2) in zip(lower₁, upper₁, lower₂, upper₂)
     ]
     #println("Prop relu 4")
+    # Z₂ = Z₁ - ∂Z <-> Z₂ - Z₁ = ∂Z
+    # TODO(steuber): We can do better than this if we consider the cases where only one network is instable
     # Difference between N1 - N2
     # Case 0: Both instable
     # Case 1: N1 zero -> Δ = 0-max(0,x1 - Δᵢ) = 0 or Δᵢ - x1 >= Δᵢ

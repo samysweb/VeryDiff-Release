@@ -24,8 +24,8 @@ for i in 1:10
         end
         W1 = randn(Float64,(new_dim,cur_dim))
         b1 = randn(Float64,new_dim)
-        W2 = W1+1e-6*randn(Float64,(new_dim,cur_dim))
-        b2 = b1+1e-6*randn(Float64,new_dim)
+        W2 = randn(Float64,(new_dim,cur_dim))
+        b2 = randn(Float64,new_dim)
         cur_dim = new_dim
         relus += new_dim
         push!(layers1, Dense(W1,b1))
