@@ -39,7 +39,7 @@ for i in 1:10
         N2 = Network(deepcopy(layers2))
         push!(networks,(N1,N2,new_dim))
     end
-    Z_original1 = Zonotope(Matrix(0.02I,input_dim,input_dim),zeros(Float64,input_dim))
+    Z_original1 = Zonotope(Matrix(0.1I,input_dim,input_dim),zeros(Float64,input_dim))
     Z_original2 = deepcopy(Z_original1)
     ∂Z_original = Zonotope(Matrix(0.0I,input_dim,input_dim),zeros(Float64,input_dim))
     Z_original = DiffZonotope(Z_original1,Z_original2,∂Z_original,0,0,0)
@@ -57,9 +57,9 @@ for i in 1:10
             push!(bounds2,(zono_optimize(-1.0,Z.Z₂,d),zono_optimize(1.0,Z.Z₂,d)))
             push!(∂bounds,(zono_optimize(-1.0,Z.∂Z,d),zono_optimize(1.0,Z.∂Z,d)))
         end
-        threshold=1e-7
+        threshold=1e-6
         for k in 1:10000
-            x = 2*0.01*rand(Float64,input_dim).-0.01
+            x = 2*0.1*rand(Float64,input_dim).-0.1
             y1 = N1(x)
             y2 = N2(x)
             for d in 1:output_dim

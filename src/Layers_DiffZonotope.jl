@@ -44,38 +44,13 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     #println("Prop relu")
     #return @timeit to "DiffZonotope_DenseProp" begin
     #println("ReLU")
-    input_dim = size(Z.Z₂,2)-Z.num_approx₂
-    output_dim = size(Z.Z₂,1)
 
     L1, _, L2 = Ls
 
-    offset_∂approx = input_dim + Z.num_approx₁ + Z.num_approx₂ + 1
-
-    bounds₁₁ = zono_bounds(Z.Z₁)
-    # Compute alternate version of bounds for Z₁ using Z₂ and ∂Z
-    b1 = two_generator_bound(Z.Z₂.G[:,1:input_dim], 1.0, Z.∂Z.G[:,1:input_dim])
-    if Z.num_approx₂ > 0
-        range_start = input_dim + Z.num_approx₁ + 1
-        range_end = input_dim + Z.num_approx₁ + Z.num_approx₂
-        b1 .+= two_generator_bound(Z.Z₂.G[:,(input_dim+1):end], 1.0, Z.∂Z.G[:,range_start:range_end])
-    end
-    if Z.∂num_approx > 0
-        b1 .+= sum(abs, Z.∂Z.G[:,offset_∂approx:end], dims=2)
-    end
-    bounds₁₂ = [(Z.Z₂.c + Z.∂Z.c).-b1 b1.+(Z.Z₂.c + Z.∂Z.c)]
-    bounds₁ = bounds₁₁
-    #bounds₁ = [max.(bounds₁₁[:,1],bounds₁₂[:,1]) min.(bounds₁₁[:,2],bounds₁₂[:,2])]
-
-    b2 = two_generator_bound(Z.Z₁.G[:,1:end], -1.0, Z.∂Z.G[:,1:(input_dim+Z.num_approx₁)])
-    if Z.∂num_approx > 0
-        b2 .+= sum(abs, Z.∂Z.G[:,offset_∂approx:end], dims=2)
-    end
-    bounds₂₁ = [(Z.Z₁.c - Z.∂Z.c).-b2 b2.+(Z.Z₁.c - Z.∂Z.c)]
-    bounds₂₂ = zono_bounds(Z.Z₂)
-    bounds₂ = bounds₂₂
-    #bounds₂ = [max.(bounds₂₁[:,1],bounds₂₂[:,1]) min.(bounds₂₁[:,2],bounds₂₂[:,2])]
+    # Compute Bounds
+    bounds₁ = zono_bounds(Z.Z₁)
+    bounds₂ = zono_bounds(Z.Z₂)
     ∂bounds = zono_bounds(Z.∂Z)
-    #println("Prop relu 1")
     lower₁ = @view bounds₁[:,1]
     upper₁ = @view bounds₁[:,2]
     lower₂ = @view bounds₂[:,1]
@@ -83,103 +58,228 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     ∂lower = @view ∂bounds[:,1]
     ∂upper = @view ∂bounds[:,2]
 
-    α = ∂upper ./ (∂upper - ∂lower)
-    # 
-    #println("Prop relu 3.1")
-    λ = ifelse.((upper₁.<=0.0 .&& upper₂ .<= 0.0) , 0.0, ifelse.(lower₁.>=0.0 .&& lower₂ .>= 0.0, 1.0, ifelse.(∂upper .<= 0.0,0.0,α)))
-    #println("Prop relu 3.2")
-    #lower₁_less0 = lower₁ .< 0.0
-    #lower₂_less0 = lower₂ .< 0.0
-    #upper₁_less0 = upper₁ .< 0.0
-    #upper₂_less0 = upper₂ .< 0.0
+    # Compute Phase Behaviour
+    neg₁ = (upper₁ .<= 0.0)
+    pos₁ = (lower₁ .>= 0.0)
+    any₁ = (!).(neg₁) .&& (!).(pos₁)
+    neg₂ = (upper₂ .<= 0.0)
+    pos₂ = (lower₂ .>= 0.0)
+    any₂ = (!).(neg₂) .&& (!).(pos₂)
 
-    #crossing = (lower₁_less0 .&& (!).(upper₁_less0)) .|| (lower₂_less0 .&& (!).(upper₂_less0)) .|| ((!).(lower₁_less0) .&& upper₂_less0) .|| ((!).(lower₂_less0) .&& upper₁_less0)
-    crossing = [
-        ((l1 < 0.0 && u1 > 0) || (l2 < 0 && u2 > 0) || (l1 > 0 && u2 < 0) || (l2 > 0 && u1 < 0))
-        for (l1, u1, l2, u2) in zip(lower₁, upper₁, lower₂, upper₂)
-    ]
-    #println("Prop relu 4")
-    # Z₂ = Z₁ - ∂Z <-> Z₂ - Z₁ = ∂Z
-    # TODO(steuber): We can do better than this if we consider the cases where only one network is instable
+    crossing_new_generator = (any₁ .&& (any₂ .|| pos₂)) .|| (pos₁ .&& any₂)
+
+    # Compute Zonotopes for individual networks
+    Z₁_new = L1(Z.Z₁,P;bounds = bounds₁)
+    Z₂_new = L2(Z.Z₂,P;bounds = bounds₂)
+
+    # Compute new dimensions
+    input_dim = size(Z.Z₂,2)-Z.num_approx₂
+    output_dim = size(Z.Z₂,1)
+    num_approx₁ = size(Z₁_new.G,2)-input_dim
+    num_approx₂ = size(Z₂_new.G,2)-input_dim
+    ∂num_approx = Z.∂num_approx+count(crossing_new_generator)
+
+    DEBUG_ANY_POS = false
+    DEBUG_POS_ANY = false
+    DEBUG_ANY_ANY = false
+    
+
+    Ĝ = zeros(Float64,
+        output_dim,
+        input_dim+num_approx₁+num_approx₂+∂num_approx)
+    ĉ = zeros(output_dim)
+    
+    selector = zeros(Bool,output_dim)
+
+    # Neg Neg:
+    # (Done through default initialization of Ĝ and ĉ)
+    # selector .= neg₁ .& neg₂
+    # Ĝ[selector] .= 0.0
+    # ĉ[selector] .= 0.0
+
+    check = (neg₁ .& neg₂)
+
+    # Neg Pos:
+    selector .= neg₁ .& pos₂
+    if any(selector)
+        # println("NEG_POS")
+        Ĝ[selector,1:input_dim] .-= Z₂_new.G[selector,1:input_dim]
+        Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= Z₂_new.G[selector,input_dim+1:end]
+        ĉ[selector] .-= Z₂_new.c[selector]
+        check .|= selector
+    end
+
+    # Pos Neg:
+    selector .= pos₁ .& neg₂
+    if any(selector)
+        # println("POS_NEG")
+        Ĝ[selector,1:input_dim+num_approx₁] .+= Z₁_new.G[selector,1:end]
+        ĉ[selector] .+= Z₁_new.c[selector]
+        check .|= selector
+    end
+
+    # Pos Pos:
+    # This just copies the row from the input ∂Z
+    # We also need this for Any Pos and Pos Any and thus we copy for those as well
+    selector .= pos₁ .&& (pos₂ .|| any₂) .|| (any₁ .&& pos₂)
+    if any(selector)
+        # println("POS_POS")
+        Ĝ[selector,1:input_dim+Z.num_approx₁] .= Z.∂Z.G[selector,1:input_dim+Z.num_approx₁]
+        if Z.num_approx₂ > 0
+            Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂]
+        end
+        if Z.∂num_approx > 0
+            Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end]
+        end
+        ĉ[selector] .= Z.∂Z.c[selector]
+        check .|= selector
+    end
+
+    # Any Neg
+    selector .= any₁ .&& neg₂
+    if any(selector)
+        # println("ANY_NEG")
+        Ĝ[selector,1:(input_dim+num_approx₁)] .= Z₁_new.G[selector,1:end]
+        ĉ[selector] .= Z₁_new.c[selector]
+        check .|= selector
+    end
+
+    # Neg Any
+    selector .= neg₁ .&& any₂
+    if any(selector)
+        # println("NEG_ANY")
+        Ĝ[selector,1:input_dim] .-= Z₂_new.G[selector,1:input_dim]
+        Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= Z₂_new.G[selector,input_dim+1:end]
+        ĉ[selector] .-= Z₂_new.c[selector]
+        check .|= selector
+    end
+
+    generator_offset = input_dim+num_approx₁+num_approx₂+Z.∂num_approx+1
+    # Any Pos
+    selector .= any₁ .&& pos₂
+    if any(selector)
+        if DEBUG_ANY_POS
+            # println("ANY_POS")
+            Ĝ[selector,:] .= 0.0
+            ĉ[selector] .= 0.0
+            count_generators = count(selector)
+            low = max.(0.0,lower₁[selector])-upper₂[selector]
+            high = upper₁[selector]-lower₂[selector]
+            mid = 0.5 .* (high+low)
+            range = 0.5 .* (high-low)
+            Ĝ[selector,generator_offset:(generator_offset+count_generators-1)] .= range .* (@view I(output_dim)[selector, selector])
+            ĉ[selector] .= mid
+            generator_offset += count_generators
+        else
+            α = lower₁[selector]
+            α ./= (α .- upper₁[selector])
+            Ĝ[selector,1:(input_dim+num_approx₁)] .-= α .* Z₁_new.G[selector,1:end]
+            ĉ[selector] .-= α .* Z₁_new.c[selector]
+            @assert all(α .> 0.0)
+            α .*= 0.5 .* max.((-).(lower₁[selector]), upper₁[selector])
+            count_generators = count(selector)
+            Ĝ[selector,(generator_offset:(generator_offset+count_generators-1))] .= (abs.(α).+1e-6).*(@view I(output_dim)[selector, selector])
+            ĉ[selector] .+= α
+            generator_offset += count_generators
+        end
+        check .|= selector
+    end
+
+    # Pos Any
+    selector .= pos₁ .&& any₂
+    if any(selector)
+        if DEBUG_POS_ANY
+            # println("POS_ANY")
+            Ĝ[selector,:] .= 0.0
+            ĉ[selector] .= 0.0
+            count_generators = count(selector)
+            low = lower₁[selector]-upper₂[selector]
+            high = upper₁[selector]-max.(0.0,lower₂[selector])
+            mid = 0.5 .* (high+low)
+            range = 0.5 .* (high-low)
+            Ĝ[selector,generator_offset:(generator_offset+count_generators-1)] .= range .* (@view I(output_dim)[selector, selector])
+            ĉ[selector] .= mid
+            generator_offset += count_generators
+        else
+            α = lower₂[selector]
+            α ./= (α .- upper₂[selector])
+            α .*= -1.0
+            Ĝ[selector,1:(input_dim)] .-= α .* Z₂_new.G[selector,1:input_dim]
+            Ĝ[selector,(input_dim+num_approx₁+1):(input_dim+num_approx₁+num_approx₂)] .-= α .* Z₂_new.G[selector,(input_dim+1):end]
+            ĉ[selector] .-= α .* Z₂_new.c[selector]
+            @assert all(α .< 0.0)
+            α .*= 0.5 .* max.((-).(lower₂[selector]), upper₂[selector])
+            count_generators = count(selector)
+            Ĝ[selector,(generator_offset:(generator_offset+count_generators-1))] .= (abs.(α).+1e-6).*(@view I(output_dim)[selector, selector])
+            ĉ[selector] .+= α
+            generator_offset += count_generators
+        end
+        check .|= selector
+    end
+
+    # Any Any
+    selector .= any₁ .&& any₂
+    if any(selector)
+        if DEBUG_ANY_ANY
+            # println("ANY_ANY")
+            Ĝ[selector,:] .= 0.0
+            ĉ[selector] .= 0.0
+            count_generators = count(selector)
+            low = max.(0.0,lower₁[selector])-upper₂[selector]
+            high = upper₁[selector]-max.(0.0,lower₂[selector])
+            mid = 0.5 .* (high+low)
+            range = 0.5 .* (high-low)
+            Ĝ[selector,generator_offset:(generator_offset+count_generators-1)] .= range .* (@view I(output_dim)[selector, selector])
+            ĉ[selector] .= mid
+        else
+            α = ∂upper[selector]
+            α ./= (α .- ∂lower[selector])
+            Ĝ[selector,1:(input_dim+Z.num_approx₁)] .= α .* Z.∂Z.G[selector,1:(input_dim+Z.num_approx₁)]
+            if Z.num_approx₂ > 0
+                Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= α .* Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂]
+            end
+            if Z.∂num_approx > 0
+                Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= α .* Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end]
+            end
+            ĉ[selector] .= α .* Z.∂Z.c[selector]
+            α .*= -∂lower[selector]
+            μ = 0.5 .* max.(∂upper[selector],-∂lower[selector])
+            count_generators = count(selector)
+            # print(generator_offset)
+            # print(count_generators)
+            # print(size(Ĝ))
+            # print(size(Ĝ[selector,(generator_offset:end)]))
+            Ĝ[selector,(generator_offset:end)] .= (abs.(μ).+1e-6).*(@view I(output_dim)[selector, selector])
+            ĉ[selector] .+= α 
+            ĉ[selector] .-= μ
+        end
+        check .|= selector
+    end
+    if !all(check)
+        println("Missed rows:")
+        println("Bounds1: ",bounds₁[(!).(check),:])
+        println("Bounds2: ",bounds₂[(!).(check),:])
+        println("∂Bounds: ",∂bounds[(!).(check),:])
+        @assert false
+    end
+
+    ∂Z_new = Zonotope(Ĝ, ĉ)
+    return DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,num_approx₁,num_approx₂,∂num_approx)
+
+    #α = ∂upper ./ (∂upper - ∂lower)
+    # λ = ifelse.((upper₁.<=0.0 .&& upper₂ .<= 0.0) , 0.0, ifelse.(lower₁.>=0.0 .&& lower₂ .>= 0.0, 1.0, ifelse.(∂upper .<= 0.0,0.0,α)))
+    
     # Difference between N1 - N2
     # Case 0: Both instable
     # Case 1: N1 zero -> Δ = 0-max(0,x1 - Δᵢ) = 0 or Δᵢ - x1 >= Δᵢ
-    δ = 0.5 .* max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
-
-    γ = crossing .* (-δ .- λ .*∂lower ) # Decrease by ∂lower to ensure 0 reachable everywhere; decrease by 0.5*δ for approximation (additional dimension scaled by larger deviation)
-    #println("Prop relu 5")
-    ĉ = λ .* Z.∂Z.c + γ
+    #δ = 0.5 .* max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
+    #γ = crossing .* (-δ .- λ .*∂lower )
+    #ĉ = λ .* Z.∂Z.c + γ
     # Ĝ = λ .* Z.∂Z.G
-    #println("Prop relu 6")
-    row_count = size(lower₁,1)
-    num_crossing = count(crossing)
- 
-    # TODO(steuber): This seems like a bad idea?
-    # E = (δ.+ sign.(δ)*1e-5) .* (@view I(row_count)[:, crossing])
-    #∂Z_new = Zonotope([Ĝ E], ĉ)
-    Z₁_new = L1(Z.Z₁,P;bounds = bounds₁)
-    Z₂_new = L2(Z.Z₂,P;bounds = bounds₂)
-    #println("Prop relu 8")
-    Ĝ = Matrix{Float64}(undef,row_count, size(Z₁_new.G,2)+(size(Z₂_new.G,2)-input_dim)+Z.∂num_approx+num_crossing)
-    # Input space columns + approx columns of net 1
-    num_cols = (input_dim+Z.num_approx₁)
-    Ĝ[:,1:num_cols] .= λ .* (@view Z.∂Z.G[:,1:num_cols])
-    #Ĝ[:,1:num_cols] .*= λ
-    Ĝ[:,num_cols+1:size(Z₁_new.G,2)] .= 0.0
-
-    # Approx columns of net 2
-    if Z.num_approx₂ > 0
-        offset_cols = size(Z₁_new.G,2)+1
-        offset_cols_z = input_dim+Z.num_approx₁+1
-        num_cols = Z.num_approx₂-1
-        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= λ .* (@view Z.∂Z.G[:,offset_cols_z:(offset_cols_z+num_cols)])
-        #Ĝ[:,offset_cols:(offset_cols+num_cols)] .*= λ
-    end
-    range_start = size(Z₁_new.G,2)+Z.num_approx₂+1
-    range_end = size(Z₁_new.G,2)+size(Z₂_new.G,2)-input_dim
-    Ĝ[:,range_start:range_end] .= 0.0
-
-    # Approx columns of ∂
-    if Z.∂num_approx > 0
-        offset_cols = size(Z₁_new.G,2)+size(Z₂_new.G,2)-input_dim+1
-        offset_cols_z = input_dim+Z.num_approx₁+Z.num_approx₂+1
-        num_cols = Z.∂num_approx-1
-        Ĝ[:,offset_cols:(offset_cols+num_cols)] .= λ .* (@view Z.∂Z.G[:,offset_cols_z:end])
-        #Ĝ[:,offset_cols:(offset_cols+num_cols)] .*= λ
-    end
-
+    #Ĝ[:,offset_cols:(offset_cols+num_cols)] .= λ .* (@view Z.∂Z.G[:,offset_cols_z:end])
     # New Approx columns
-    offset_cols = size(Z₁_new.G,2)+size(Z₂_new.G,2)-input_dim+Z.∂num_approx+1
-    Ĝ[:,offset_cols:end] .= (δ.+ sign.(δ)*1e-5) .* (@view I(row_count)[:, crossing])
+    #Ĝ[:,offset_cols:end] .= (δ.+ sign.(δ)*1e-5) .* (@view I(output_dim)[:, crossing])
 
-    ∂Z_new = Zonotope(Ĝ, ĉ)
-
-    # ∂Z_new = Zonotope(hcat(
-    #     (@view Ĝ[:,1:input_dim+Z.num_approx₁]),
-    #     zeros(Float64,(row_count,size(Z₁_new.G,2)-Z.num_approx₁-input_dim)),
-    #     (@view Ĝ[:,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂]),
-    #     zeros(Float64,(row_count,size(Z₂_new.G,2)-Z.num_approx₂-input_dim)),
-    #     (@view Ĝ[:,input_dim+Z.num_approx₁+Z.num_approx₂+1:end]),
-    #     E
-    # ), ĉ)
-    #println("Prop relu 9")
-    # i=1
-    # if size(∂lower,1)>=i
-    #     println(lower₁[i])
-    #     println(upper₁[i])
-    #     println(lower₂[i])
-    #     println(upper₂[i])
-    #     println(∂lower[i])
-    #     println(∂upper[i])
-    #     println(crossing[i])
-    #     println(λ[i])
-    #     println(δ[i])
-    #     println(γ[i])
-    #     println(∂Z_new.c[i])
-    #     println(∂Z_new.G[i,:])
-    # end
-    return DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,size(Z₁_new,2)-input_dim,size(Z₂_new,2)-input_dim,Z.∂num_approx+num_crossing)
-    #end
 end
 
 

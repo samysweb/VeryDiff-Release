@@ -109,6 +109,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
     should_terminate = sync_res.value
     wait_time = sync_res.time
     total_work = 0.0
+    first=true
     # @debug "[Thread $(threadid)] Initiating loop"
     loop_time = @elapsed begin
     while !should_terminate
@@ -125,6 +126,13 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             #prop_state.i = 1
             #@timeit to "NetworkProp" 
             Zout = N(Zin, prop_state)
+            if first
+                println("Zono Bounds:")
+                bounds = zono_bounds(Zout.∂Z)
+                println(bounds[1,:])
+                println(bounds[2,:])
+                first=false
+            end
 
             prop_satisfied, cex, heuristics_info, verification_status = property_check(N1, N2, Zin, Zout, verification_task.verification_status)
             if !prop_satisfied
