@@ -129,8 +129,8 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             if first
                 println("Zono Bounds:")
                 bounds = zono_bounds(Zout.∂Z)
-                println(bounds[1,:])
-                println(bounds[2,:])
+                println(bounds[:,1])
+                println(bounds[:,2])
                 first=false
             end
 
@@ -165,7 +165,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             should_terminate = true
         end
         k+=1
-        if k%100 == 0
+        if k%1000 == 0
             println("[Thread $(threadid)] Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=5))%; Expected Zonos: $(total_zonos/total_work))")
         end
         #end

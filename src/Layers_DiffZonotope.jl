@@ -46,11 +46,46 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     #println("ReLU")
 
     L1, _, L2 = Ls
+    input_dim = size(Z.Z₂,2)-Z.num_approx₂
 
     # Compute Bounds
     bounds₁ = zono_bounds(Z.Z₁)
+    # Compute alternative version of bounds via Z.Z₂+Z.∂Z
+    # bounds₁₂ = zeros(size(Z.Z₂.G,1))
+    # for i in 1:input_dim
+    #     bounds₁₂ .+= abs.(Z.Z₂.G[:,i].+Z.∂Z.G[:,i])
+    # end
+    # for i in 1:Z.num_approx₂
+    #     bounds₁₂ .+= abs.(Z.Z₂.G[:,input_dim+i].+Z.∂Z.G[:,input_dim+Z.num_approx₁+i])
+    # end
+    # for i in 1:Z.∂num_approx
+    #     bounds₁₂ .+= abs.(Z.∂Z.G[:,input_dim+Z.num_approx₁+Z.num_approx₂+i])
+    # end
+    # bounds₁[:,1] = max.(bounds₁[:,1],(Z.Z₂.c .+ Z.∂Z.c) .- bounds₁₂)
+    # bounds₁[:,2] = min.(bounds₁[:,2],(Z.Z₂.c .+ Z.∂Z.c) .+ bounds₁₂)
     bounds₂ = zono_bounds(Z.Z₂)
+    # bounds₂₁ = zeros(size(Z.Z₂.G,1))
+    # for i in 1:(input_dim+Z.num_approx₁)
+    #     bounds₂₁ .+= abs.(Z.Z₁.G[:,i].-Z.∂Z.G[:,i])
+    # end
+    # for i in 1:Z.∂num_approx
+    #     bounds₂₁ .+= abs.(Z.∂Z.G[:,input_dim+Z.num_approx₁+Z.num_approx₂+i])
+    # end
+    # bounds₂[:,1] = max.(bounds₂[:,1],(Z.Z₁.c .- Z.∂Z.c) .- bounds₂₁)
+    # bounds₂[:,2] = min.(bounds₂[:,2],(Z.Z₁.c .- Z.∂Z.c) .+ bounds₂₁)
     ∂bounds = zono_bounds(Z.∂Z)
+    # ∂bounds₁₂ = zeros(size(Z.Z₂.G,1))
+    # for i in 1:input_dim
+    #     ∂bounds₁₂ .+= abs.(Z.Z₁.G[:,i].-Z.Z₂.G[:,i])
+    # end
+    # for i in 1:Z.num_approx₁
+    #     ∂bounds₁₂ .+= abs.(Z.Z₁.G[:,input_dim+i])
+    # end
+    # for i in 1:Z.num_approx₂
+    #     ∂bounds₁₂ .+= abs.(Z.Z₂.G[:,input_dim+i])
+    # end
+    # ∂bounds[:,1] = max.(∂bounds[:,1],(Z.Z₁.c .- Z.Z₂.c) .- ∂bounds₁₂)
+    # ∂bounds[:,2] = min.(∂bounds[:,2],(Z.Z₁.c .- Z.Z₂.c) .+ ∂bounds₁₂)
     lower₁ = @view bounds₁[:,1]
     upper₁ = @view bounds₁[:,2]
     lower₂ = @view bounds₂[:,1]
@@ -73,7 +108,6 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     Z₂_new = L2(Z.Z₂,P;bounds = bounds₂)
 
     # Compute new dimensions
-    input_dim = size(Z.Z₂,2)-Z.num_approx₂
     output_dim = size(Z.Z₂,1)
     num_approx₁ = size(Z₁_new.G,2)-input_dim
     num_approx₂ = size(Z₂_new.G,2)-input_dim
@@ -103,9 +137,9 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     selector .= neg₁ .& pos₂
     if any(selector)
         # println("NEG_POS")
-        Ĝ[selector,1:input_dim] .-= Z₂_new.G[selector,1:input_dim]
-        Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= Z₂_new.G[selector,input_dim+1:end]
-        ĉ[selector] .-= Z₂_new.c[selector]
+        Ĝ[selector,1:input_dim] .-= (@view Z₂_new.G[selector,1:input_dim])
+        Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= (@view Z₂_new.G[selector,input_dim+1:end])
+        ĉ[selector] .-= (@view Z₂_new.c[selector])
         check .|= selector
     end
 
@@ -113,8 +147,8 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     selector .= pos₁ .& neg₂
     if any(selector)
         # println("POS_NEG")
-        Ĝ[selector,1:input_dim+num_approx₁] .+= Z₁_new.G[selector,1:end]
-        ĉ[selector] .+= Z₁_new.c[selector]
+        Ĝ[selector,1:input_dim+num_approx₁] .+= (@view Z₁_new.G[selector,1:end])
+        ĉ[selector] .+= (@view Z₁_new.c[selector])
         check .|= selector
     end
 
@@ -124,14 +158,14 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     selector .= pos₁ .&& (pos₂ .|| any₂) .|| (any₁ .&& pos₂)
     if any(selector)
         # println("POS_POS")
-        Ĝ[selector,1:input_dim+Z.num_approx₁] .= Z.∂Z.G[selector,1:input_dim+Z.num_approx₁]
+        Ĝ[selector,1:input_dim+Z.num_approx₁] .= (@view Z.∂Z.G[selector,1:input_dim+Z.num_approx₁])
         if Z.num_approx₂ > 0
-            Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂]
+            Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂])
         end
         if Z.∂num_approx > 0
-            Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end]
+            Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end])
         end
-        ĉ[selector] .= Z.∂Z.c[selector]
+        ĉ[selector] .= (@view Z.∂Z.c[selector])
         check .|= selector
     end
 
@@ -139,8 +173,8 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     selector .= any₁ .&& neg₂
     if any(selector)
         # println("ANY_NEG")
-        Ĝ[selector,1:(input_dim+num_approx₁)] .= Z₁_new.G[selector,1:end]
-        ĉ[selector] .= Z₁_new.c[selector]
+        Ĝ[selector,1:(input_dim+num_approx₁)] .= (@view Z₁_new.G[selector,1:end])
+        ĉ[selector] .= (@view Z₁_new.c[selector])
         check .|= selector
     end
 
@@ -148,9 +182,9 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     selector .= neg₁ .&& any₂
     if any(selector)
         # println("NEG_ANY")
-        Ĝ[selector,1:input_dim] .-= Z₂_new.G[selector,1:input_dim]
-        Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= Z₂_new.G[selector,input_dim+1:end]
-        ĉ[selector] .-= Z₂_new.c[selector]
+        Ĝ[selector,1:input_dim] .-= (@view Z₂_new.G[selector,1:input_dim])
+        Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= (@view Z₂_new.G[selector,input_dim+1:end])
+        ĉ[selector] .-= (@view Z₂_new.c[selector])
         check .|= selector
     end
 
@@ -173,8 +207,8 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         else
             α = lower₁[selector]
             α ./= (α .- upper₁[selector])
-            Ĝ[selector,1:(input_dim+num_approx₁)] .-= α .* Z₁_new.G[selector,1:end]
-            ĉ[selector] .-= α .* Z₁_new.c[selector]
+            Ĝ[selector,1:(input_dim+num_approx₁)] .-= α .* (@view Z₁_new.G[selector,1:end])
+            ĉ[selector] .-= α .* (@view Z₁_new.c[selector])
             @assert all(α .> 0.0)
             α .*= 0.5 .* max.((-).(lower₁[selector]), upper₁[selector])
             count_generators = count(selector)
@@ -204,9 +238,9 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
             α = lower₂[selector]
             α ./= (α .- upper₂[selector])
             α .*= -1.0
-            Ĝ[selector,1:(input_dim)] .-= α .* Z₂_new.G[selector,1:input_dim]
-            Ĝ[selector,(input_dim+num_approx₁+1):(input_dim+num_approx₁+num_approx₂)] .-= α .* Z₂_new.G[selector,(input_dim+1):end]
-            ĉ[selector] .-= α .* Z₂_new.c[selector]
+            Ĝ[selector,1:(input_dim)] .-= α .* (@view Z₂_new.G[selector,1:input_dim])
+            Ĝ[selector,(input_dim+num_approx₁+1):(input_dim+num_approx₁+num_approx₂)] .-= α .* (@view Z₂_new.G[selector,(input_dim+1):end])
+            ĉ[selector] .-= α .* (@view Z₂_new.c[selector])
             @assert all(α .< 0.0)
             α .*= 0.5 .* max.((-).(lower₂[selector]), upper₂[selector])
             count_generators = count(selector)
@@ -234,14 +268,14 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         else
             α = ∂upper[selector]
             α ./= (α .- ∂lower[selector])
-            Ĝ[selector,1:(input_dim+Z.num_approx₁)] .= α .* Z.∂Z.G[selector,1:(input_dim+Z.num_approx₁)]
+            Ĝ[selector,1:(input_dim+Z.num_approx₁)] .= α .* (@view Z.∂Z.G[selector,1:(input_dim+Z.num_approx₁)])
             if Z.num_approx₂ > 0
-                Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= α .* Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂]
+                Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= α .* (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂])
             end
             if Z.∂num_approx > 0
-                Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= α .* Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end]
+                Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= α .* (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end])
             end
-            ĉ[selector] .= α .* Z.∂Z.c[selector]
+            ĉ[selector] .= α .* (@view Z.∂Z.c[selector])
             α .*= -∂lower[selector]
             μ = 0.5 .* max.(∂upper[selector],-∂lower[selector])
             count_generators = count(selector)

@@ -45,11 +45,11 @@ function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
 
     γ = 0.5 .* max.(-λ .* lower,0.0,((-).(1.0,λ)).*upper)  # Computed offset (-λl/2)
 
-    Ĝ = Matrix{Float64}(undef,row_count, size(Z.G,2)+count(crossing))
+    Ĝ = zeros(Float64,row_count, size(Z.G,2)+count(crossing))
     #zeros(row_count, size(Z.G,2)+count(crossing))
     Z.G .*= λ
     Ĝ[:,1:size(Z.G,2)] .= Z.G
-    Ĝ[:,size(Z.G,2)+1:end] .=  (@view I(row_count)[:, crossing])
+    Ĝ[crossing,size(Z.G,2)+1:end] .=  (@view I(row_count)[crossing, crossing])
     Ĝ[:,size(Z.G,2)+1:end] .*= γ
 
     ĉ = λ .* Z.c .+ crossing.*γ
