@@ -7,6 +7,13 @@ struct Queue{T}
     end
 end
 
+function empty!(q::Queue{T}) where T
+    n = length(q.queue)
+    for i in 1:n
+        pop!(q.queue)
+    end
+end
+
 function push!(q::Queue, x)
     push!(q.queue,Ref(x))
 end
@@ -32,6 +39,7 @@ end
 
 function invoke_termination(state::MultiThreaddedQueue)
     lock(state.lock) do
+        empty!(state.common_queue)
         state.should_exit = true
         notify(state.condition)
     end

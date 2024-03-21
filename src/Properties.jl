@@ -14,7 +14,36 @@ function get_epsilon_property(epsilon;focus_dim=nothing)
                 maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₂.c)))
             end
             if sample_distance>epsilon
-                return false, (Zin.Z₁.c, sample_distance), nothing, nothing
+                return false, (Zin.Z₁.c, (N1(Zin.Z₁.c),N2(Zin.Z₂.c),sample_distance)), nothing, nothing
+            else
+                return false, nothing, (out_bounds, epsilon, focus_dim), nothing
+            end
+        else
+            return true, nothing, nothing, nothing
+        end
+    end
+end
+
+function get_epsilon_property_naive(epsilon;focus_dim=nothing)
+    return (N1, N2, Zin, Zout, verification_status) -> begin
+        #TODO: Use verification status to ignore proven epsilons
+        b = sum(abs,Zout.Z₁.G[:,1:size(Zout.Z₁.G,2)-Zout.num_approx₁] .- Zout.Z₂.G[:,1:size(Zout.Z₂.G,2)-Zout.num_approx₂];dims=2)
+        b += sum(abs,Zout.Z₁.G[:,size(Zout.Z₁.G,2)-Zout.num_approx₁+1:end],dims=2)
+        b += sum(abs,Zout.Z₂.G[:,size(Zout.Z₂.G,2)-Zout.num_approx₂+1:end],dims=2)
+        out_bounds = [(Zout.Z₁.c .- Zout.Z₂.c)-b (Zout.Z₁.c .- Zout.Z₂.c)+b]
+        distance_bound = if !isnothing(focus_dim)
+            maximum(abs.(out_bounds[focus_dim,:]))
+        else
+            maximum(abs.(out_bounds))
+        end
+        if distance_bound > epsilon
+            sample_distance = if !isnothing(focus_dim)
+                abs.(N1(Zin.Z₁.c)[focus_dim]-N2(Zin.Z₂.c)[focus_dim])
+            else
+                maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₂.c)))
+            end
+            if sample_distance>epsilon
+                return false, (Zin.Z₁.c, (N1(Zin.Z₁.c),N2(Zin.Z₂.c),sample_distance)), nothing, nothing
             else
                 return false, nothing, (out_bounds, epsilon, focus_dim), nothing
             end
@@ -179,22 +208,23 @@ function top1_configure_split_heuristic(mode)
     elseif mode == 3
         (t,o) -> t+o
     end
-    return (Zin,Zout,heuristics_info) -> begin
+    return (Zin,Zout,heuristics_info,distance_indices) -> begin
         top_dimension_importance,other_dimension_importance = heuristics_info
         dimension_importance = dimension_importance_mode(top_dimension_importance,other_dimension_importance)
         input_dim = size(Zin.Z₁.G,2)
-        return argmax(
+        d = argmax(
             sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,dimension_importance.*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
         )[1]
+        return distance_indices[d]
     end
 end
 
-function epsilon_split_heuristic(Zin,Zout,heuristics_info)
+function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
     out_bounds = heuristics_info[1]
     epsilon = heuristics_info[2]
     focus_dim = heuristics_info[3]
     input_dim = size(Zin.Z₁.G,2)
-    res = argmax(
+    d = argmax(
         sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
     )[1]
     #println(out_bounds)
@@ -203,5 +233,5 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info)
     #println(sum(abs,Zin.Z₁.G,dims=1)[1,:])
     #println(res)
     #println("--------------------------------------------------")
-    return res
+    return distance_indices[d]
 end

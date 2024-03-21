@@ -81,13 +81,15 @@ function verify_network(
     end
     end
     show(to)
+    common_state=nothing
+    nothing
 end
 
 function worker_function(common_state, threadid, prop_state,N,N1,N2,property_check, split_heuristic, num_threads;timeout=Inf)
     try
         thread_result = @timed worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num_threads, property_check, split_heuristic, timeout=timeout)
         println("[Thread $(threadid)] Finished in $(round(thread_result.time;digits=2))s")
-        return thread_result.value
+        return nothing
     catch e
         println("[Thread $(threadid)] Caught exception: $(e)")
         showerror(stdout, e, catch_backtrace())
@@ -141,7 +143,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
                     invoke_termination(common_state)
                 else
                     splits += 1
-                    split_d = split_heuristic(Zin,Zout,heuristics_info)
+                    split_d = split_heuristic(Zin,Zout,heuristics_info,verification_task.distance_indices)
                     Z1, Z2 = split_zono(split_d, verification_task,work_share,verification_status)
                     Zin=nothing
                     push!(task_queue, Z1)
@@ -164,20 +166,31 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             invoke_termination(common_state)
             should_terminate = true
         end
+        if total_zonos > 1_000 && iszero(total_work)
+            println("No resolved zonotopes after depth 1000 -> aborting")
+            println("TIMEOUT")
+            println("UNKNOWN")
+            empty!(task_queue)
+            invoke_termination(common_state)
+            should_terminate = true
+        end
         k+=1
-        if k%1000 == 0
+        if k%100 == 0
             println("[Thread $(threadid)] Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=5))%; Expected Zonos: $(total_zonos/total_work))")
         end
         #end
     end
     end
+    empty!(task_queue)
+    invoke_termination(common_state)
     println("[Thread $(threadid)] Total splits: $(splits)")
     print("Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=1))%); Generated $(generated_zonos) (Waited $(round(wait_time;digits=2))s; $(loop_time/k)s/loop)\n")
 end
 
 function split_zono(d, verification_task :: VerificationTask, work_share, verification_status)
     #return @timeit to "Split_Zono" begin
-    distance_d = d # findfirst(x->x==d,verification_task.distance_indices)
+    distance_d = findfirst(x->x==d,verification_task.distance_indices)
+    @assert !isnothing(distance_d)
     low = verification_task.middle[d]-verification_task.distance[distance_d]
     high = verification_task.middle[d]+verification_task.distance[distance_d]
     mid = verification_task.middle[d]
