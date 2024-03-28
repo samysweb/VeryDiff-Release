@@ -205,14 +205,16 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
             ĉ[selector] .= mid
             generator_offset += count_generators
         else
-            α = lower₁[selector]
-            α ./= (α .- upper₁[selector])
-            Ĝ[selector,1:(input_dim+num_approx₁)] .-= α .* (@view Z₁_new.G[selector,1:end])
-            ĉ[selector] .-= α .* (@view Z₁_new.c[selector])
+            # println("ANY_POS")
+            α = -lower₁[selector]
+            α ./= (upper₁[selector] .- lower₁[selector])
+            Ĝ[selector,1:(input_dim+Z.num_approx₁)] .-= α .* (@view Z.Z₁.G[selector,1:end])
+            ĉ[selector] .-= α .* (@view Z.Z₁.c[selector])
             @assert all(α .> 0.0)
-            α .*= 0.5 .* max.((-).(lower₁[selector]), upper₁[selector])
+            α .*= 0.5 .* upper₁[selector] #max.((-).(lower₁[selector]), upper₁[selector])
+            #α .= max.(0.5.*α.*upper₁[selector],(1.0.-α).*((-).(lower₁[selector])))
             count_generators = count(selector)
-            Ĝ[selector,(generator_offset:(generator_offset+count_generators-1))] .= (abs.(α).+1e-6).*(@view I(output_dim)[selector, selector])
+            Ĝ[selector,(generator_offset:(generator_offset+count_generators-1))] .= (abs.(α)).*(@view I(output_dim)[selector, selector])
             ĉ[selector] .+= α
             generator_offset += count_generators
         end
@@ -235,17 +237,19 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
             ĉ[selector] .= mid
             generator_offset += count_generators
         else
-            α = lower₂[selector]
-            α ./= (α .- upper₂[selector])
-            α .*= -1.0
-            Ĝ[selector,1:(input_dim)] .-= α .* (@view Z₂_new.G[selector,1:input_dim])
-            Ĝ[selector,(input_dim+num_approx₁+1):(input_dim+num_approx₁+num_approx₂)] .-= α .* (@view Z₂_new.G[selector,(input_dim+1):end])
-            ĉ[selector] .-= α .* (@view Z₂_new.c[selector])
-            @assert all(α .< 0.0)
-            α .*= 0.5 .* max.((-).(lower₂[selector]), upper₂[selector])
+            # println("POS_ANY")
+            α = -lower₂[selector]
+            α ./= (upper₂[selector] .- lower₂[selector])
+            Ĝ[selector,1:(input_dim)] .+= α .* (@view Z.Z₂.G[selector,1:input_dim])
+            Ĝ[selector,(input_dim+num_approx₁+1):(input_dim+num_approx₁+Z.num_approx₂)] .+= α .* (@view Z.Z₂.G[selector,(input_dim+1):end])
+            ĉ[selector] .+= α .* (@view Z.Z₂.c[selector])
+            @assert all(α .> 0.0)
+            #α .= max.(0.5.*α.*upper₂[selector],(1.0.-α).*((-).(lower₂[selector])))
+            α .*= 0.5 .* upper₂[selector] #max.((-).(lower₂[selector]), upper₂[selector])
+            #0.5 .* max.((-).(lower₂[selector]), upper₂[selector])
             count_generators = count(selector)
-            Ĝ[selector,(generator_offset:(generator_offset+count_generators-1))] .= (abs.(α).+1e-6).*(@view I(output_dim)[selector, selector])
-            ĉ[selector] .+= α
+            Ĝ[selector,(generator_offset:(generator_offset+count_generators-1))] .= (abs.(α)).*(@view I(output_dim)[selector, selector])
+            ĉ[selector] .-= α
             generator_offset += count_generators
         end
         check .|= selector
@@ -268,6 +272,9 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         else
             α = ∂upper[selector]
             α ./= (α .- ∂lower[selector])
+            # TODO: what's this?
+            α .= clamp.(α,0.0,1.0)
+            @assert all(α .>= 0.0) && all(α .<= 1.0)
             Ĝ[selector,1:(input_dim+Z.num_approx₁)] .= α .* (@view Z.∂Z.G[selector,1:(input_dim+Z.num_approx₁)])
             if Z.num_approx₂ > 0
                 Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= α .* (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂])
@@ -276,14 +283,14 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
                 Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= α .* (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end])
             end
             ĉ[selector] .= α .* (@view Z.∂Z.c[selector])
-            α .*= -∂lower[selector]
+            α .*= -min.(0.0,∂lower[selector])
             μ = 0.5 .* max.(∂upper[selector],-∂lower[selector])
             count_generators = count(selector)
             # print(generator_offset)
             # print(count_generators)
             # print(size(Ĝ))
             # print(size(Ĝ[selector,(generator_offset:end)]))
-            Ĝ[selector,(generator_offset:end)] .= (abs.(μ).+1e-6).*(@view I(output_dim)[selector, selector])
+            Ĝ[selector,(generator_offset:end)] .= (abs.(μ)).*(@view I(output_dim)[selector, selector])
             ĉ[selector] .+= α 
             ĉ[selector] .-= μ
         end
