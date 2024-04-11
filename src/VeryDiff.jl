@@ -15,6 +15,7 @@ function __init__()
     GRB_ENV[] = Gurobi.Env()
     GRBsetintparam(GRB_ENV[], "OutputFlag", 0)
     GRBsetintparam(GRB_ENV[], "LogToConsole", 0)
+    GRBsetintparam(GRB_ENV[], "Threads", 0)
     #GRBsetintparam(GRB_ENV[], "Method", 2)
     #       mnist_19_local_21.vnnlib        mnist_18_local_18
     #0 :    0.018826400587219343s/loop      0.03304489948205128s/loop
@@ -24,6 +25,7 @@ end
 
 #pinthreads(:cores)
 
+FIRST_ROUND = true
 
 import Zygote.ChainRulesCore.rrule
 

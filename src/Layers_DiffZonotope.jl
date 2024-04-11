@@ -188,9 +188,12 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         check .|= selector
     end
 
+    instable_new_generators = 0
+
     generator_offset = input_dim+num_approx₁+num_approx₂+Z.∂num_approx+1
     # Any Pos
     selector .= any₁ .&& pos₂
+    instable_new_generators += count(selector)
     if any(selector)
         if DEBUG_ANY_POS
             # println("ANY_POS")
@@ -223,6 +226,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
 
     # Pos Any
     selector .= pos₁ .&& any₂
+    instable_new_generators += count(selector)
     if any(selector)
         if DEBUG_POS_ANY
             # println("POS_ANY")
@@ -257,6 +261,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
 
     # Any Any
     selector .= any₁ .&& any₂
+    instable_new_generators += count(selector)
     if any(selector)
         if DEBUG_ANY_ANY
             # println("ANY_ANY")
@@ -302,6 +307,10 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         println("Bounds2: ",bounds₂[(!).(check),:])
         println("∂Bounds: ",∂bounds[(!).(check),:])
         @assert false
+    end
+
+    if FIRST_ROUND
+        print("Instable Generators: ",instable_new_generators,"\n")
     end
 
     ∂Z_new = Zonotope(Ĝ, ĉ)

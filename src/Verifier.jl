@@ -5,6 +5,7 @@ function verify_network(
     property_check,
     split_heuristic;
     timeout=Inf)
+    global FIRST_ROUND = true
     # Timing
     reset_timer!(to)
     @timeit to "Initialize" begin
@@ -137,6 +138,7 @@ function worker_function_internal(common_state, threadid, prop_state,N,N1,N2,num
             end
 
             prop_satisfied, cex, heuristics_info, verification_status = property_check(N1, N2, Zin, Zout, verification_task.verification_status)
+            global FIRST_ROUND = false
             if !prop_satisfied
                 if !isnothing(cex)
                     println("\nFound counterexample: $(cex)")
