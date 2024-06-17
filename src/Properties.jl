@@ -60,8 +60,8 @@ function get_top1_property(;scale=one(Float64))
         end
         input_dim = size(Zout.Z₂,2)-Zout.num_approx₂
         #generator_importance = zeros(input_dim)
-        top_dimension_importance = zeros(size(Zout.Z₁.G,1))
-        other_dimension_importance = zeros(size(Zout.Z₁.G,1))
+        top_dimension_violation = zeros(input_dim) #size(Zout.Z₁.G,1))
+        #other_dimension_importance = zeros(size(Zout.Z₁.G,1))
         argmax_N1 = argmax(N1(Zin.Z₁.c))
         argmax_N2 = argmax(N2(Zin.Z₂.c))
         if argmax_N1 != argmax_N2
@@ -144,6 +144,8 @@ function get_top1_property(;scale=one(Float64))
                     if other_index != top_index && !haskey(verification_status, (top_index,other_index))
                         a = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
                         a[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
+                        violation_difference = a
+                        #abs.(Zout.Z₁.G[top_index,1:input_dim] .- Zout.Z₂.G[top_index,1:input_dim]) .+ abs.(Zout.Z₁.G[other_index,1:input_dim] .- Zout.Z₂.G[other_index,1:input_dim])
                         @objective(model,Max,a'*x)
                         # print("Calling GLPK (timeout=$(time_limit_sec(model)))")
                         optimize!(model)
@@ -151,8 +153,9 @@ function get_top1_property(;scale=one(Float64))
                         threshold = Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
                         @assert termination_status(model) != MOI.INFEASIBLE
                         if termination_status(model) != MOI.OPTIMAL
-                                top_dimension_importance[top_index] += 1
-                                other_dimension_importance[other_index] + 1
+                                #top_dimension_importance[top_index] += 1
+                                #other_dimension_importance[other_index] += 1
+                                top_dimension_violation .+= abs.(violation_difference[1:input_dim])
                                 property_satisfied = false
                                 continue
                         end
@@ -175,14 +178,16 @@ function get_top1_property(;scale=one(Float64))
                                     return false, (input, (argmax_N1, argmax_N2)), nothing, nothing
                                 else
                                     println("Discared cex due to scale ($(softmax_N1[argmax_N1]/second_most) < $scale)")
-                                    top_dimension_importance[top_index] += 1
-                                    other_dimension_importance[other_index] + 1
+                                    #top_dimension_importance[top_index] += 1
+                                    #other_dimension_importance[other_index] += 1
+                                    top_dimension_violation .+= abs.(violation_difference[1:input_dim])
                                     property_satisfied = false
                                 end
                             else
                                 #generator_importance .= max.(generator_importance, abs.(a[1:input_dim]))
-                                top_dimension_importance[top_index] += 1
-                                other_dimension_importance[other_index] + 1
+                                #top_dimension_importance[top_index] += 1
+                                #other_dimension_importance[other_index] += 1
+                                top_dimension_violation .+= abs.(violation_difference[1:input_dim])
                                 property_satisfied = false
                             end
                         end
@@ -194,26 +199,38 @@ function get_top1_property(;scale=one(Float64))
         # if property_satisfied
         #     println("Zonotope Top 1 Equivalent!")
         # end
-        return property_satisfied, nothing, (top_dimension_importance,other_dimension_importance), verification_status
+        return property_satisfied, nothing, top_dimension_violation, verification_status
     end
 end
 
 function top1_configure_split_heuristic(mode)
-    dimension_importance_mode = if mode == 0
-        (t,o) -> (t.>0)
-    elseif mode == 1
-        (t,o) -> (t.>0 .|| o.>0)
-    elseif mode == 2
-        (t,o) -> t
-    elseif mode == 3
-        (t,o) -> t+o
-    end
+    # dimension_importance_mode = if mode == 0
+    #     (t,o) -> (t.>0)
+    # elseif mode == 1
+    #     (t,o) -> (t.>0 .|| o.>0)
+    # elseif mode == 2
+    #     (t,o) -> t
+    # elseif mode == 3
+    #     (t,o) -> t+o
+    # end
     return (Zin,Zout,heuristics_info,distance_indices) -> begin
-        top_dimension_importance,other_dimension_importance = heuristics_info
-        dimension_importance = dimension_importance_mode(top_dimension_importance,other_dimension_importance)
+        top_dimension_violation = heuristics_info
+        top_dimension_violation ./= norm(top_dimension_violation,2)
+        #dimension_importance = dimension_importance_mode(top_dimension_importance,other_dimension_importance)
         input_dim = size(Zin.Z₁.G,2)
+        ∂weights = sum(abs, (Zout.∂Z.G[:,1:input_dim] ),dims=1)[1,:]
+        ∂weights ./= norm(∂weights,2)
+        diff_weights = sum(abs, (Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+        diff_weights ./= norm(diff_weights,2)
+
+
         d = argmax(
-            sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,dimension_importance.*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+            # sum(abs,Zin.Z₁.G,dims=1)[1,:].*
+            # (∂weights .+ diff_weights)
+            diff_weights
+            #∂weights
+            .+
+            top_dimension_violation
         )[1]
         return distance_indices[d]
     end
@@ -224,14 +241,18 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
     epsilon = heuristics_info[2]
     focus_dim = heuristics_info[3]
     input_dim = size(Zin.Z₁.G,2)
+
+    ∂weights = sum(abs,(Zout.∂Z.G[:,1:input_dim] ),dims=1)[1,:]
+    ∂weights ./= norm(∂weights,2)
+    diff_weights = sum(abs,(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+    diff_weights ./= norm(diff_weights,2)
+
+
     d = argmax(
-        sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+        # sum(abs,Zin.Z₁.G,dims=1)[1,:].*
+        #(∂weights .+ diff_weights)
+        diff_weights
     )[1]
-    #println(out_bounds)
-    #println((Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ))
-    #println(sum(abs,any(abs.(out_bounds).>epsilon,dims=2)[:,1].*(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:])
-    #println(sum(abs,Zin.Z₁.G,dims=1)[1,:])
-    #println(res)
-    #println("--------------------------------------------------")
+    
     return distance_indices[d]
 end
