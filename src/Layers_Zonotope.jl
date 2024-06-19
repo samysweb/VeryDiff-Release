@@ -14,7 +14,7 @@ function (L::Dense)(Z :: Zonotope,P :: PropState)
     #return @timeit to "Zonotope_DenseProp" begin
     G = L.W * Z.G
     c = L.W * Z.c .+ L.b
-    return Zonotope(G,c)
+    return Zonotope(G,c, Z.influence)
     #end
 end
 
@@ -42,7 +42,16 @@ function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
     λ = ifelse.(upper.<=0.0,0.0,ifelse.(lower.>=0.0,1.0,α))
 
     crossing = lower.<0.0 .&& upper.>0.0
-
+    
+    # TODO(steuber): Can we avoid this reallocation?
+    influence_new = zeros(Float64, size(Z.influence,1), size(Z.influence,2)+count(crossing))
+    influence_new[:,1:size(Z.influence,2)] .= Z.influence
+    # print("Hello")
+    # print(size(influence_new))
+    # print(size(Z.influence * Z.G[crossing,:]'))
+    influence_new[:,(size(Z.influence,2)+1):end] .=  Z.influence * Z.G[crossing,:]'
+    influence_new ./= norm(influence_new,2)
+    
     γ = 0.5 .* max.(-λ .* lower,0.0,((-).(1.0,λ)).*upper)  # Computed offset (-λl/2)
 
     Ĝ = zeros(Float64,row_count, size(Z.G,2)+count(crossing))
@@ -55,6 +64,6 @@ function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
 
     ĉ = λ .* Z.c .+ crossing.*γ
 
-    return Zonotope(Ĝ, ĉ)
+    return Zonotope(Ĝ, ĉ, influence_new)
     #end
 end

@@ -1,6 +1,7 @@
 mutable struct Zonotope
     G::Matrix{Float64}
     c::Vector{Float64}
+    influence::Union{Matrix{Float64},Nothing}
 end
 
 struct VerificationTask

@@ -30,7 +30,7 @@ function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P
     ∂c = L1.W*Z.∂Z.c #.+ ∂L.W * Z.Z₂.c .+ ∂L.b
     mul!(∂c, ∂L.W, Z.Z₂.c, 1.0, 1.0)
     ∂c .+= ∂L.b
-    ∂Z_new = Zonotope(∂G,∂c)
+    ∂Z_new = Zonotope(∂G,∂c,Z.∂Z.influence)
     return DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),∂Z_new,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
     #end
 end
@@ -110,8 +110,11 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     # Compute new dimensions
     output_dim = size(Z.Z₂,1)
     num_approx₁ = size(Z₁_new.G,2)-input_dim
+    num_approx₁_additional = num_approx₁-Z.num_approx₁
     num_approx₂ = size(Z₂_new.G,2)-input_dim
+    num_approx₂_additional = num_approx₂-Z.num_approx₂
     ∂num_approx = Z.∂num_approx+count(crossing_new_generator)
+    ∂num_approx_additional = ∂num_approx-Z.∂num_approx
 
     DEBUG_ANY_POS = false
     DEBUG_POS_ANY = false
@@ -124,6 +127,14 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     ĉ = zeros(output_dim)
     
     selector = zeros(Bool,output_dim)
+
+
+    #influence_new = zeros(Float64, size(Z.∂Z.influence,1), size(Z.∂Z.influence,2)+num_approx₁_additional+num_approx₂_additional+∂num_approx_additional)
+
+    #influence_new[:,1:input_dim] .= Z.∂Z.influence
+    #influence_new[:,(input_dim+1):(input_dim+Z.num_approx₁)] .= Z.∂Z.influence[:,(input_dim+1):(input_dim+Z.num_approx₁)]
+    #influence_new[:,(input_dim+num_approx₁+1):(input_dim+num_approx₁+Z.num_approx₂)] .= Z.∂Z.influence[:,(input_dim+Z.num_approx₁+1):(input_dim+Z.num_approx₁+Z.num_approx₂)]
+    #influence_new[:,(input_dim+num_approx₁+num_approx₂+1):(input_dim+num_approx₁+num_approx₂+Z.∂num_approx)] .= Z.∂Z.influence[:,(input_dim+Z.num_approx₁+Z.num_approx₂+1):end]
 
     # Neg Neg:
     # (Done through default initialization of Ĝ and ĉ)
@@ -313,7 +324,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         print("Instable Generators: ",instable_new_generators,"\n")
     end
 
-    ∂Z_new = Zonotope(Ĝ, ĉ)
+    ∂Z_new = Zonotope(Ĝ, ĉ, Z.∂Z.influence)
     return DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,num_approx₁,num_approx₂,∂num_approx)
 
     #α = ∂upper ./ (∂upper - ∂lower)

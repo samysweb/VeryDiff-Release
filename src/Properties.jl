@@ -244,8 +244,10 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
 
     ∂weights = sum(abs,(Zout.∂Z.G[:,1:input_dim] ),dims=1)[1,:]
     ∂weights ./= norm(∂weights,2)
-    diff_weights = sum(abs,(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
-    diff_weights ./= norm(diff_weights,2)
+    #diff_weights = sum(abs,(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+    #diff_weights ./= norm(diff_weights,2)
+
+    diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(Zout.Z₁.influence*(Zout.Z₁.G[:,:]').-Zout.Z₂.influence*(Zout.Z₂.G[:,:]')),dims=1)[1,:]
 
 
     d = argmax(
@@ -253,6 +255,8 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
         #(∂weights .+ diff_weights)
         diff_weights
     )[1]
+
+    #print("Selected: $d (vs. $d_alternative)")
     
     return distance_indices[d]
 end
