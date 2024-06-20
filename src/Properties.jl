@@ -218,20 +218,28 @@ function top1_configure_split_heuristic(mode)
         top_dimension_violation ./= norm(top_dimension_violation,2)
         #dimension_importance = dimension_importance_mode(top_dimension_importance,other_dimension_importance)
         input_dim = size(Zin.Z₁.G,2)
-        ∂weights = sum(abs, (Zout.∂Z.G[:,1:input_dim] ),dims=1)[1,:]
-        ∂weights ./= norm(∂weights,2)
-        diff_weights = sum(abs, (Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+        #∂weights = sum(abs, (Zout.∂Z.G[:,1:input_dim] ),dims=1)[1,:]
+        #∂weights ./= norm(∂weights,2)
+        #diff_weights = sum(abs, (Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+        #diff_weights ./= norm(diff_weights,2)
+
+        #diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,((Zout.Z₁.G)*Zout.Z₁.influence'.-(Zout.Z₂.G)*Zout.Z₂.influence'),dims=1)[1,:]
+        diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(abs.(Zout.Z₁.G)*abs.(Zout.Z₁.influence').+abs.(Zout.Z₂.G)*abs.(Zout.Z₂.influence')),dims=1)[1,:]
         diff_weights ./= norm(diff_weights,2)
 
-
-        d = argmax(
-            # sum(abs,Zin.Z₁.G,dims=1)[1,:].*
-            # (∂weights .+ diff_weights)
-            diff_weights
-            #∂weights
-            .+
-            top_dimension_violation
-        )[1]
+        if mode==1
+            d = argmax(
+                diff_weights
+            )[1]
+        elseif mode==2
+            d = argmax(
+                top_dimension_violation
+            )[1]
+        elseif mode==3
+            d = argmax(
+                diff_weights .+ top_dimension_violation
+            )[1]
+        end
         return distance_indices[d]
     end
 end
@@ -247,7 +255,17 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
     #diff_weights = sum(abs,(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
     #diff_weights ./= norm(diff_weights,2)
 
-    diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(Zout.Z₁.influence*(Zout.Z₁.G[:,:]').-Zout.Z₂.influence*(Zout.Z₂.G[:,:]')),dims=1)[1,:]
+    #
+    #print(size(Zout.Z₁.influence))
+    #print(size(Zout.Z₂.influence))
+    #println(size(((Zout.Z₁.G[:,:])*Zout.Z₁.influence'.-(Zout.Z₂.G[:,:])*Zout.Z₂.influence')))
+    #if isnothing(focus_dim)
+    #    relevant_dimensions=any(abs.(out_bounds).>epsilon,dims=2)[:,1]
+    #else
+    #    relevant_dimensions=focus_dim:(focus_dim)
+    #end
+    #print(size(relevant_dimensions))
+    diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(abs.(Zout.Z₁.G)*abs.(Zout.Z₁.influence').+abs.(Zout.Z₂.G)*abs.(Zout.Z₂.influence')),dims=1)[1,:]
 
 
     d = argmax(

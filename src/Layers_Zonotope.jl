@@ -50,7 +50,7 @@ function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
     # print(size(influence_new))
     # print(size(Z.influence * Z.G[crossing,:]'))
     influence_new[:,(size(Z.influence,2)+1):end] .=  Z.influence * Z.G[crossing,:]'
-    influence_new ./= norm(influence_new,2)
+    #foreach(normalize!, eachcol(@view influence_new[:,(size(Z.influence,2)+1):end]))
     
     γ = 0.5 .* max.(-λ .* lower,0.0,((-).(1.0,λ)).*upper)  # Computed offset (-λl/2)
 
