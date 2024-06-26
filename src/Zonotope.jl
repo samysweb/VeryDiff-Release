@@ -13,3 +13,13 @@ function zono_bounds(Z::Zonotope)
     return [Z.c.-b b.+Z.c]
     #end
 end
+
+function zono_get_max_vector(Z::Zonotope, direction::Vector{Float64})
+    weights = direction' * Z.G
+    return -1.0*(weights .< 0.0) + 1.0*(weights .>= 0.0)
+end
+
+function zono_get_max_vector(Z::Zonotope, d)
+    weights = Z.G[d,:]
+    return -1.0*(weights .< 0.0) + 1.0*(weights .>= 0.0)
+end

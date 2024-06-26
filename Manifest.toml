@@ -2,7 +2,7 @@
 
 julia_version = "1.9.3"
 manifest_format = "2.0"
-project_hash = "3f58a9f01c5502ce93154c15fd4e9112f5cfc5b2"
+project_hash = "5de8e2a741cf929d2a1351088e1ad4cc86f07bfa"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -149,9 +149,9 @@ version = "1.14.0"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
-git-tree-sha1 = "cf25ccb972fec4e4817764d01c82386ae94f77b4"
+git-tree-sha1 = "1d0a14036acb104d9e89698bd408f63ab58cdc82"
 uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-version = "0.18.14"
+version = "0.18.20"
 
 [[deps.DataValueInterfaces]]
 git-tree-sha1 = "bfc1187b79289637fa0ef6d4436ebdfe6905cbd6"
@@ -757,11 +757,11 @@ version = "0.1.5"
 
 [[deps.VNNLib]]
 deps = ["LinearAlgebra", "MLStyle", "Mmap", "ProtoBuf", "SymbolicUtils", "Tokenize"]
-git-tree-sha1 = "e3eca82e310348685a4e44bd9b59233cfccc8ad0"
-repo-rev = "0a0ff02"
+git-tree-sha1 = "b7ba8aa07c25daa6e1a0ed79ecd792a0882495f0"
+repo-rev = "ce9cc82"
 repo-url = "https://github.com/samysweb/VNNLib.jl"
 uuid = "286915b0-5841-4eea-9013-d818f395ad8c"
-version = "0.2.0"
+version = "0.2.2"
 
 [[deps.Zlib_jll]]
 deps = ["Libdl"]

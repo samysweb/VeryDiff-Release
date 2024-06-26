@@ -21,7 +21,11 @@ end
 
 function to_diff_zono(task :: VerificationTask)
     input_dim = size(task.middle,1)
-    Z1 = Zonotope(Matrix(I, input_dim, input_dim)[:,task.distance_indices] .* task.distance', task.middle, Matrix(1.0I, size(task.distance_indices,1), size(task.distance_indices,1)))
+    if NEW_HEURISTIC
+        Z1 = Zonotope(Matrix(I, input_dim, input_dim)[:,task.distance_indices] .* task.distance', task.middle, Matrix(1.0I, size(task.distance_indices,1), size(task.distance_indices,1)))
+    else
+        Z1 = Zonotope(Matrix(I, input_dim, input_dim)[:,task.distance_indices] .* task.distance', task.middle, nothing)
+    end
     Z2 = deepcopy(Z1)
     return DiffZonotope(Z1, Z2, task.∂Z, 0, 0, 0)
 end

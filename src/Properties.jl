@@ -1,54 +1,41 @@
+function get_sample_distance(N1, N2, vector, focus_dim=nothing)
+    if !isnothing(focus_dim)
+        abs.(N1(vector)[focus_dim]-N2(vector)[focus_dim])
+    else
+        maximum(abs.(N1(vector)-N2(vector)))
+    end
+end
+
 function get_epsilon_property(epsilon;focus_dim=nothing)
     return (N1, N2, Zin, Zout, verification_status) -> begin
         #TODO: Use verification status to ignore proven epsilons
         out_bounds = zono_bounds(Zout.∂Z)
-        distance_bound = if !isnothing(focus_dim)
-            maximum(abs.(out_bounds[focus_dim,:]))
+        input_dim = size(Zin.Z₁.G,2)
+        distance_bound, max_dim = if !isnothing(focus_dim)
+            maximum(abs.(out_bounds[focus_dim,:])),focus_dim
         else
-            maximum(abs.(out_bounds))
+            maximum(abs.(out_bounds)),argmax(abs.(out_bounds))[1]
         end
         if distance_bound > epsilon
-            sample_distance = if !isnothing(focus_dim)
-                abs.(N1(Zin.Z₁.c)[focus_dim]-N2(Zin.Z₂.c)[focus_dim])
-            else
-                maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₂.c)))
+            sample_distance = get_sample_distance(N1, N2, Zin.Z₁.c, focus_dim)
+            # for i in 1:size(Zout.Z₁.G,1)
+            max_vec = zono_get_max_vector(Zout.Z₁,max_dim)[1:input_dim]
+            for c in [-1.0,1.0]
+                next_vec = Zin.Z₁.G*(max_vec*c)+Zin.Z₁.c
+                sample_distance = max(
+                    sample_distance,
+                    get_sample_distance(N1, N2, next_vec, focus_dim)
+                )
             end
+            # end
             if sample_distance>epsilon
-                return false, (Zin.Z₁.c, (N1(Zin.Z₁.c),N2(Zin.Z₂.c),sample_distance)), nothing, nothing
-            else
-                return false, nothing, (out_bounds, epsilon, focus_dim), nothing
+                return false, (Zin.Z₁.c, (N1(Zin.Z₁.c),N2(Zin.Z₂.c),sample_distance)), nothing, nothing, distance_bound
             end
-        else
-            return true, nothing, nothing, nothing
-        end
-    end
-end
 
-function get_epsilon_property_naive(epsilon;focus_dim=nothing)
-    return (N1, N2, Zin, Zout, verification_status) -> begin
-        #TODO: Use verification status to ignore proven epsilons
-        b = sum(abs,Zout.Z₁.G[:,1:size(Zout.Z₁.G,2)-Zout.num_approx₁] .- Zout.Z₂.G[:,1:size(Zout.Z₂.G,2)-Zout.num_approx₂];dims=2)
-        b += sum(abs,Zout.Z₁.G[:,size(Zout.Z₁.G,2)-Zout.num_approx₁+1:end],dims=2)
-        b += sum(abs,Zout.Z₂.G[:,size(Zout.Z₂.G,2)-Zout.num_approx₂+1:end],dims=2)
-        out_bounds = [(Zout.Z₁.c .- Zout.Z₂.c)-b (Zout.Z₁.c .- Zout.Z₂.c)+b]
-        distance_bound = if !isnothing(focus_dim)
-            maximum(abs.(out_bounds[focus_dim,:]))
+
+            return false, nothing, (out_bounds, epsilon, focus_dim), nothing, distance_bound
         else
-            maximum(abs.(out_bounds))
-        end
-        if distance_bound > epsilon
-            sample_distance = if !isnothing(focus_dim)
-                abs.(N1(Zin.Z₁.c)[focus_dim]-N2(Zin.Z₂.c)[focus_dim])
-            else
-                maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₂.c)))
-            end
-            if sample_distance>epsilon
-                return false, (Zin.Z₁.c, (N1(Zin.Z₁.c),N2(Zin.Z₂.c),sample_distance)), nothing, nothing
-            else
-                return false, nothing, (out_bounds, epsilon, focus_dim), nothing
-            end
-        else
-            return true, nothing, nothing, nothing
+            return true, nothing, nothing, nothing, distance_bound
         end
     end
 end
@@ -69,6 +56,7 @@ function get_top1_property(;scale=one(Float64))
             return false, (Zin.Z₁.c, (argmax_N1, argmax_N2)), nothing, nothing
         end
         property_satisfied = true
+        distance_bound = 0.0
         # Formulation of "Description of Z₁-∂Z = Z₂" in LP:
         #
         # n2_G = -Zout.∂Z.G
@@ -157,11 +145,15 @@ function get_top1_property(;scale=one(Float64))
                                 #other_dimension_importance[other_index] += 1
                                 top_dimension_violation .+= abs.(violation_difference[1:input_dim])
                                 property_satisfied = false
+                                if has_values(model)
+                                    distance_bound = max(distance_bound, objective_value(model))
+                                end
                                 continue
                         end
                         if objective_value(model) < threshold
                             verification_status[(top_index,other_index)]=true
                         else
+                            distance_bound = max(distance_bound, objective_value(model))
                             input = Zin.Z₁.G*value.(x[1:input_dim])+Zin.Z₁.c
                             res1 = N1(input)
                             res2 = N2(input)
@@ -199,7 +191,7 @@ function get_top1_property(;scale=one(Float64))
         # if property_satisfied
         #     println("Zonotope Top 1 Equivalent!")
         # end
-        return property_satisfied, nothing, top_dimension_violation, verification_status
+        return property_satisfied, nothing, top_dimension_violation, verification_status, distance_bound
     end
 end
 
@@ -224,8 +216,13 @@ function top1_configure_split_heuristic(mode)
         #diff_weights ./= norm(diff_weights,2)
 
         #diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,((Zout.Z₁.G)*Zout.Z₁.influence'.-(Zout.Z₂.G)*Zout.Z₂.influence'),dims=1)[1,:]
-        diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(abs.(Zout.Z₁.G)*abs.(Zout.Z₁.influence').+abs.(Zout.Z₂.G)*abs.(Zout.Z₂.influence')),dims=1)[1,:]
-        diff_weights ./= norm(diff_weights,2)
+        if NEW_HEURISTIC
+            diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(abs.(Zout.Z₁.G)*abs.(Zout.Z₁.influence').+abs.(Zout.Z₂.G)*abs.(Zout.Z₂.influence')),dims=1)[1,:]
+            diff_weights ./= norm(diff_weights,2)
+        else
+            diff_weights = sum(abs, (Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+            diff_weights ./= norm(diff_weights,2)
+        end
 
         if mode==1
             d = argmax(
@@ -250,8 +247,8 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
     focus_dim = heuristics_info[3]
     input_dim = size(Zin.Z₁.G,2)
 
-    ∂weights = sum(abs,(Zout.∂Z.G[:,1:input_dim] ),dims=1)[1,:]
-    ∂weights ./= norm(∂weights,2)
+    # ∂weights = sum(abs,(Zout.∂Z.G[:,1:input_dim] ),dims=1)[1,:]
+    # ∂weights ./= norm(∂weights,2)
     #diff_weights = sum(abs,(Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
     #diff_weights ./= norm(diff_weights,2)
 
@@ -265,7 +262,12 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
     #    relevant_dimensions=focus_dim:(focus_dim)
     #end
     #print(size(relevant_dimensions))
-    diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(abs.(Zout.Z₁.G)*abs.(Zout.Z₁.influence').+abs.(Zout.Z₂.G)*abs.(Zout.Z₂.influence')),dims=1)[1,:]
+    if NEW_HEURISTIC
+        diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(abs.(Zout.Z₁.G)*abs.(Zout.Z₁.influence').+abs.(Zout.Z₂.G)*abs.(Zout.Z₂.influence')),dims=1)[1,:]
+    else
+        diff_weights = sum(abs, (Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
+        diff_weights ./= norm(diff_weights,2)
+    end
 
 
     d = argmax(

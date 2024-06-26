@@ -43,14 +43,18 @@ function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
 
     crossing = lower.<0.0 .&& upper.>0.0
     
-    # TODO(steuber): Can we avoid this reallocation?
-    influence_new = zeros(Float64, size(Z.influence,1), size(Z.influence,2)+count(crossing))
-    influence_new[:,1:size(Z.influence,2)] .= Z.influence
-    # print("Hello")
-    # print(size(influence_new))
-    # print(size(Z.influence * Z.G[crossing,:]'))
-    influence_new[:,(size(Z.influence,2)+1):end] .=  Z.influence * Z.G[crossing,:]'
-    #foreach(normalize!, eachcol(@view influence_new[:,(size(Z.influence,2)+1):end]))
+    if NEW_HEURISTIC
+        # TODO(steuber): Can we avoid this reallocation?
+        influence_new = zeros(Float64, size(Z.influence,1), size(Z.influence,2)+count(crossing))
+        influence_new[:,1:size(Z.influence,2)] .= Z.influence
+        # print("Hello")
+        # print(size(influence_new))
+        # print(size(Z.influence * Z.G[crossing,:]'))
+        influence_new[:,(size(Z.influence,2)+1):end] .=  Z.influence * Z.G[crossing,:]'
+        #foreach(normalize!, eachcol(@view influence_new[:,(size(Z.influence,2)+1):end]))
+    else
+        influence_new = Z.influence
+    end
     
     γ = 0.5 .* max.(-λ .* lower,0.0,((-).(1.0,λ)).*upper)  # Computed offset (-λl/2)
 

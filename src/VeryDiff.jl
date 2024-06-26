@@ -9,6 +9,8 @@ using VNNLib
 using NLSolvers
 #using ThreadPinning
 
+NEW_HEURISTIC = true
+
 # We have our own multithreadding so we don't want to use BLAS multithreadding
 function __init__()
     BLAS.set_num_threads(1)

@@ -10,6 +10,7 @@ struct VerificationTask
     distance_indices :: Vector{Int}
     ∂Z::Zonotope
     verification_status
+    distance_bound :: Float64
 end
 
 # Z₂ = Z₁ - ∂Z
