@@ -1,10 +1,6 @@
-using Zygote.ChainRulesCore
-
 import VNNLib.NNLoader.Network
 import VNNLib.NNLoader.Dense
 import VNNLib.NNLoader.ReLU
-
-import Zygote.ChainRulesCore.rrule
 
 function (N::Network)(Z :: Zonotope, P :: PropState)
     return foldl((Z,L) -> L(Z,P),N.layers,init=Z)

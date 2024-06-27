@@ -1,5 +1,3 @@
-using Zygote.ChainRulesCore
-
 import VNNLib.NNLoader.Network
 import VNNLib.NNLoader.Dense
 import VNNLib.NNLoader.ReLU

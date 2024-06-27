@@ -1,12 +1,9 @@
 module VeryDiff
 
-using Zygote
-using Zygote.ChainRulesCore
 using MaskedArrays
 using LinearAlgebra
 using SparseArrays
 using VNNLib
-using NLSolvers
 #using ThreadPinning
 
 NEW_HEURISTIC = true
@@ -29,13 +26,8 @@ end
 
 FIRST_ROUND = true
 
-import Zygote.ChainRulesCore.rrule
-
 using TimerOutputs
 const to = TimerOutput()
-
-#using Enzyme
-#using NLSolvers
 
 using JuMP
 using GLPK
