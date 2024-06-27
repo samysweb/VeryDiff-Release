@@ -4,26 +4,24 @@ import Base.Order.Ordering
 using DataStructures
 
 struct VerificationTaskOrdering <: Ordering end
-struct RefVerificationTaskOrdering <: Ordering end
-lt(o::VerificationTaskOrdering, a, b) = a[2].distance_bound < b[2].distance_bound
-lt(o::RefVerificationTaskOrdering, a, b) = b[][2].distance_bound < a[][2].distance_bound
+lt(o::VerificationTaskOrdering, a, b) = b[2].distance_bound < a[2].distance_bound
 
 mutable struct Queue
-    queue::BinaryHeap{Ref{Tuple{Float64,VerificationTask}},RefVerificationTaskOrdering}
+    queue::BinaryHeap{Tuple{Float64,VerificationTask},VerificationTaskOrdering}
     function Queue()
-        return new(BinaryHeap{Ref{Tuple{Float64,VerificationTask}}}(RefVerificationTaskOrdering()))
+        return new(BinaryHeap{Tuple{Float64,VerificationTask}}(VerificationTaskOrdering()))
     end
 end
 
 function empty!(q::Queue)
-    q.queue = BinaryHeap{Ref{Tuple{Float64,VerificationTask}}}(RefVerificationTaskOrdering())
+    q.queue = BinaryHeap{Tuple{Float64,VerificationTask}}(VerificationTaskOrdering())
 end
 
 function push!(q::Queue, x)
-    push!(q.queue,Ref(x))
+    push!(q.queue,x)
 end
 function pop!(q::Queue)
-    return pop!(q.queue)[]
+    return pop!(q.queue)
 end
 function length(q::Queue)
     return length(q.queue)

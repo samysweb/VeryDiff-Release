@@ -113,15 +113,18 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
     #should_terminate = sync_queues!(threadid, qork, task_queue)
     #sync_res = @timed sync_queues!(threadid, common_state, task_queue)
     should_terminate = length(work_queue) == 0
+    do_not_split = false
     #wait_time = sync_res.time
     total_work = 0.0
     first=true
     # @debug "[Thread $(threadid)] Initiating loop"
     loop_time = @elapsed begin
     while !should_terminate
+        input_dim=1
         try
             work_share, verification_task = pop!(work_queue)
             Zin = to_diff_zono(verification_task)
+            input_dim = size(Zin.Z₁.G,2)
             if k == 0
                 println("[Thread $(threadid)] Time to first task: $(round((time_ns()-starttime)/1e9;digits=2))s")
             end
@@ -147,7 +150,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
                     @assert all(zono_bounds(Zin.Z₁)[:,1] .<= cex[1] .&& cex[1] .<= zono_bounds(Zin.Z₂)[:,2])
                     println("\nFound counterexample: $(cex)")
                     should_terminate = true
-                else
+                elseif !do_not_split
                     splits += 1
                     split_d = split_heuristic(Zin,Zout,heuristics_info,verification_task.distance_indices)
                     Z1, Z2 = split_zono(split_d, verification_task,work_share,verification_status, distance_bound)
@@ -167,14 +170,14 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
             println("UNKNOWN")
             should_terminate = true
         end
-        # Even if we haven't done any work we may find a counterexample
-        # if total_zonos > 1_000 && iszero(total_work)
-        #     println("No resolved zonotopes after depth 1000 -> aborting")
-        #     println("TIMEOUT")
-        #     println("UNKNOWN")
-        #     empty!(work_queue)
-        #     should_terminate = true
-        # end
+        # Even if we haven't done any work we may find a counterexample, but unfortunately
+        # memory is bounded...
+        if length(work_queue) > 2500 && total_work < 1e-3 && input_dim > 100
+            println("2500 Zonotopes in task queue: NO MORE SPLITTING!")
+            println("This is to avoid memory overflows.")
+            println("WARNING: FROM THIS POINT ONWARDS, WE ARE ONLY SEARCHING FOR COUNTEREXAMPLES!")
+            do_not_split = true
+        end
         should_terminate |= length(work_queue) == 0
         k+=1
         if k%100 == 0
@@ -184,6 +187,10 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
     end
     end
     empty!(work_queue)
+    if do_not_split
+        println("\n\nTIMEOUT REACHED")
+        println("UNKNOWN")
+    end
     println("[Thread $(threadid)] Total splits: $(splits)")
     print("Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=1))%); Generated $(generated_zonos) ($(loop_time/k)s/loop)\n")
 end
