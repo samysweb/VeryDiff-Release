@@ -1,8 +1,8 @@
 module VeryDiff
 
-using MaskedArrays
+#using MaskedArrays
 using LinearAlgebra
-using SparseArrays
+#using SparseArrays
 using VNNLib
 #using ThreadPinning
 
@@ -30,7 +30,7 @@ using TimerOutputs
 const to = TimerOutput()
 
 using JuMP
-using GLPK
+#using GLPK
 using Gurobi
 
 const GRB_ENV = Ref{Any}(nothing)

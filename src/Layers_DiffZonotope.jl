@@ -4,7 +4,7 @@ import VNNLib.NNLoader.ReLU
 
 function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P::PropState)
     #println("Prop dense")
-    #return @timeit to "DiffZonotope_DenseProp" begin
+    return @timeit to "DiffZonotope_DenseProp" begin
     #println("Dense")
     L1, ∂L, L2 = Ls
     ∂G = Matrix{Float64}(undef, size(L1.W,1), size(Z.∂Z.G,2))
@@ -30,7 +30,7 @@ function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P
     ∂c .+= ∂L.b
     ∂Z_new = Zonotope(∂G,∂c,Z.∂Z.influence)
     return DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),∂Z_new,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
-    #end
+    end
 end
 
 function two_generator_bound(G::Matrix{Float64}, b, H::Matrix{Float64})
@@ -40,7 +40,7 @@ end
 
 function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::PropState)
     #println("Prop relu")
-    #return @timeit to "DiffZonotope_DenseProp" begin
+    return @timeit to "DiffZonotope_ReLUProp" begin
     #println("ReLU")
 
     L1, _, L2 = Ls
@@ -338,7 +338,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     #Ĝ[:,offset_cols:(offset_cols+num_cols)] .= λ .* (@view Z.∂Z.G[:,offset_cols_z:end])
     # New Approx columns
     #Ĝ[:,offset_cols:end] .= (δ.+ sign.(δ)*1e-5) .* (@view I(output_dim)[:, crossing])
-
+    end
 end
 
 

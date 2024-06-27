@@ -1,4 +1,4 @@
-using Random
+#using Random
 
 function verify_network(
     N1 :: Network,
@@ -118,6 +118,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
     total_work = 0.0
     first=true
     # @debug "[Thread $(threadid)] Initiating loop"
+    @timeit to "Zonotope Loop" begin
     loop_time = @elapsed begin
     while !should_terminate
         input_dim=1
@@ -133,8 +134,9 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
             total_zonos+=1
             # Initial Pass
             #prop_state.i = 1
-            #@timeit to "NetworkProp" 
+            @timeit to "Zonotope Propagate" begin
             Zout = N(Zin, prop_state)
+            end
             if first
                 println("Zono Bounds:")
                 bounds = zono_bounds(Zout.∂Z)
@@ -143,7 +145,9 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
                 first=false
             end
 
+            @timeit to "Property Check" begin
             prop_satisfied, cex, heuristics_info, verification_status, distance_bound = property_check(N1, N2, Zin, Zout, verification_task.verification_status)
+            end
             global FIRST_ROUND = false
             if !prop_satisfied
                 if !isnothing(cex)
@@ -151,6 +155,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
                     println("\nFound counterexample: $(cex)")
                     should_terminate = true
                 elseif !do_not_split
+                    @timeit to "Compute Split" begin
                     splits += 1
                     split_d = split_heuristic(Zin,Zout,heuristics_info,verification_task.distance_indices)
                     Z1, Z2 = split_zono(split_d, verification_task,work_share,verification_status, distance_bound)
@@ -158,6 +163,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
                     push!(work_queue, Z1)
                     push!(work_queue, Z2)
                     generated_zonos+=2
+                    end
                 end
             else
                 total_work += work_share
@@ -184,6 +190,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
             println("[Thread $(threadid)] Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=5))%; Expected Zonos: $(total_zonos/total_work))")
         end
         #end
+    end
     end
     end
     empty!(work_queue)
