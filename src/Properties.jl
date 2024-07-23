@@ -167,7 +167,7 @@ function get_top1_property(;scale=one(Float64))
                                 #println("N2: $(softmax_N1[argmax_N2])")
                                 if isone(scale) || abs(softmax_N1[argmax_N1]/second_most) >= scale
                                     println("N1 Scale: $(softmax_N1[argmax_N1]/second_most) >= $scale")
-                                    return false, (input, (argmax_N1, argmax_N2)), nothing, nothing
+                                    return false, (input, (argmax_N1, argmax_N2)), nothing, nothing, 0.0
                                 else
                                     println("Discared cex due to scale ($(softmax_N1[argmax_N1]/second_most) < $scale)")
                                     #top_dimension_importance[top_index] += 1
