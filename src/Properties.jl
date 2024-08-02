@@ -17,19 +17,23 @@ function get_epsilon_property(epsilon;focus_dim=nothing)
             maximum(abs.(out_bounds)),argmax(abs.(out_bounds))[1]
         end
         if distance_bound > epsilon
-            sample_distance = get_sample_distance(N1, N2, Zin.Z₁.c, focus_dim)
+            cex_input = Zin.Z₁.c
+            sample_distance = get_sample_distance(N1, N2, cex_input, focus_dim)
             # for i in 1:size(Zout.Z₁.G,1)
             max_vec = zono_get_max_vector(Zout.Z₁,max_dim)[1:input_dim]
             for c in [-1.0,1.0]
-                next_vec = Zin.Z₁.G*(max_vec*c)+Zin.Z₁.c
+                cex_input = Zin.Z₁.G*(max_vec*c)+Zin.Z₁.c
                 sample_distance = max(
                     sample_distance,
-                    get_sample_distance(N1, N2, next_vec, focus_dim)
+                    get_sample_distance(N1, N2, cex_input, focus_dim)
                 )
+                if sample_distance>epsilon
+                    break
+                end
             end
             # end
             if sample_distance>epsilon
-                return false, (Zin.Z₁.c, (N1(Zin.Z₁.c),N2(Zin.Z₂.c),sample_distance)), nothing, nothing, distance_bound
+                return false, (Zin.Z₁.c, (N1(cex_input),N2(cex_input),sample_distance)), nothing, nothing, distance_bound
             end
 
 
@@ -99,7 +103,11 @@ function get_top1_property(;scale=one(Float64))
             # set_attribute(GRB_ENV[], "LogToConsole", 0)
             # set_attribute(GRB_ENV[], "OutputFlag", 0)
             # set_attribute(GRB_ENV[], "Method", 1)
-            model = Model(() -> Gurobi.Optimizer(GRB_ENV[]))
+            if USE_GUROBI
+                model = Model(() -> Gurobi.Optimizer(GRB_ENV[]))
+            else
+                model = Model(GLPK.Optimizer)
+            end
             # Gurobi: 
             # Processed 1973 zonotopes (Work Done: 100.0%); Generated 1972 (Waited 0.0s; 0.014410304252407502s/loop)
             # [Thread 1] Finished in 28.43s

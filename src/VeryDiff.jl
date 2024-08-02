@@ -6,7 +6,10 @@ using LinearAlgebra
 using VNNLib
 #using ThreadPinning
 
+using GLPK
+
 NEW_HEURISTIC = true
+USE_GUROBI = true
 
 # We have our own multithreadding so we don't want to use BLAS multithreadding
 function __init__()
