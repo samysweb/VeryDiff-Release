@@ -11,6 +11,8 @@ using GLPK
 NEW_HEURISTIC = true
 USE_GUROBI = true
 
+USE_DIFFZONO = true
+
 # We have our own multithreadding so we don't want to use BLAS multithreadding
 function __init__()
     BLAS.set_num_threads(1)
@@ -53,7 +55,7 @@ export parse_network
 export Zonotope, DiffZonotope, PropState
 export zono_optimize, zono_bounds
 export verify_network
-export get_epsilon_property, epsilon_split_heuristic
+export get_epsilon_property, epsilon_split_heuristic, get_epsilon_property_naive
 export get_top1_property, top1_configure_split_heuristic
 
 end # module AlphaZono

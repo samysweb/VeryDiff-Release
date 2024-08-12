@@ -44,7 +44,36 @@ function get_epsilon_property(epsilon;focus_dim=nothing)
     end
 end
 
-function get_top1_property(;scale=one(Float64))
+function get_epsilon_property_naive(epsilon;focus_dim=nothing)
+    return (N1, N2, Zin, Zout, verification_status) -> begin
+        #TODO: Use verification status to ignore proven epsilons
+        b = sum(abs,Zout.Z₁.G[:,1:size(Zout.Z₁.G,2)-Zout.num_approx₁] .- Zout.Z₂.G[:,1:size(Zout.Z₂.G,2)-Zout.num_approx₂];dims=2)
+        b += sum(abs,Zout.Z₁.G[:,size(Zout.Z₁.G,2)-Zout.num_approx₁+1:end],dims=2)
+        b += sum(abs,Zout.Z₂.G[:,size(Zout.Z₂.G,2)-Zout.num_approx₂+1:end],dims=2)
+        out_bounds = [(Zout.Z₁.c .- Zout.Z₂.c)-b (Zout.Z₁.c .- Zout.Z₂.c)+b]
+        distance_bound = if !isnothing(focus_dim)
+            maximum(abs.(out_bounds[focus_dim,:]))
+        else
+            maximum(abs.(out_bounds))
+        end
+        if distance_bound > epsilon
+            sample_distance = if !isnothing(focus_dim)
+                abs.(N1(Zin.Z₁.c)[focus_dim]-N2(Zin.Z₂.c)[focus_dim])
+            else
+                maximum(abs.(N1(Zin.Z₁.c)-N2(Zin.Z₂.c)))
+            end
+            if sample_distance>epsilon
+                return false, (Zin.Z₁.c, (N1(Zin.Z₁.c),N2(Zin.Z₂.c),sample_distance)), nothing, nothing, distance_bound
+            else
+                return false, nothing, (out_bounds, epsilon, focus_dim), nothing, distance_bound
+            end
+        else
+            return true, nothing, nothing, nothing, distance_bound
+        end
+    end
+end
+
+function get_top1_property(;scale=one(Float64),naive=false)
     return (N1, N2, Zin, Zout, verification_status) -> begin
         if isnothing(verification_status)
             verification_status = Dict{Tuple{Int,Int},Bool}()
@@ -138,15 +167,24 @@ function get_top1_property(;scale=one(Float64))
                 #println("FEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
                     if other_index != top_index && !haskey(verification_status, (top_index,other_index))
-                        a = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
-                        a[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
+                        if naive
+                            a = zeros(size(Zout.∂Z.G,2))
+                            a[1:size(Zout.Z₂.G,2)] = Zout.Z₂.G[other_index,:]-Zout.Z₂.G[top_index,:]
+                        else
+                            a = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
+                            a[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
+                        end
                         violation_difference = a
                         #abs.(Zout.Z₁.G[top_index,1:input_dim] .- Zout.Z₂.G[top_index,1:input_dim]) .+ abs.(Zout.Z₁.G[other_index,1:input_dim] .- Zout.Z₂.G[other_index,1:input_dim])
                         @objective(model,Max,a'*x)
                         # print("Calling GLPK (timeout=$(time_limit_sec(model)))")
                         optimize!(model)
                         # print("Returning from GLPK")
-                        threshold = Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
+                        threshold = if naive
+                            Zout.Z₂.c[top_index]-Zout.Z₂.c[other_index]
+                        else
+                            threshold = Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
+                        end
                         @assert termination_status(model) != MOI.INFEASIBLE
                         if termination_status(model) != MOI.OPTIMAL
                                 #top_dimension_importance[top_index] += 1
