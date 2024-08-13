@@ -203,12 +203,12 @@ function get_top1_property(;scale=one(Float64),naive=false)
             #print("Returning from GLPK")
             
             if termination_status(model) == MOI.INFEASIBLE
-                println("$top_index INFEASIBLE")
+                #println("$top_index INFEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
                     verification_status[(top_index,other_index)]=true
                 end
             else
-                println("$top_index FEASIBLE")
+                #println("$top_index FEASIBLE")
                 #println("FEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
                     if other_index != top_index && !haskey(verification_status, (top_index,other_index))
