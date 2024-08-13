@@ -116,14 +116,6 @@ function get_top1_property(;scale=one(Float64),naive=false)
             G1 = Zout.Z₁.G .- Zout.Z₁.G[top_index:top_index,:]
             c1 = Zout.Z₁.c[top_index] .- Zout.Z₁.c
 
-            # Second formulation of "top_index is maximal in N1":
-            #
-            # G2 = deepcopy(Zout.∂Z.G)
-            # G2[:,1:input_dim] .+= Zout.Z₂.G[:,1:input_dim]
-            # G2[:,z2_approx_start:z2_approx_end] .+= Zout.Z₂.G[:,(input_dim+1):end]
-            # G2 .-= G2[top_index:top_index,:]
-            # c2 = (Zout.∂Z.c[top_index] .+ Zout.Z₂.c[top_index]) .- (Zout.∂Z.c .+ Zout.Z₂.c)
-
             
             #model = Model(GLPK.Optimizer)
             # GLPK:
@@ -142,12 +134,64 @@ function get_top1_property(;scale=one(Float64),naive=false)
             # [Thread 1] Finished in 28.43s
                 #set_attribute(model, "NumericFocus", 2)
             set_time_limit_sec(model, 10)
-            @variable(model,-1.0 <= x[1:size(Zout.∂Z.G,2)] <= 1.0)
+            var_num = size(Zin.Z₁.G,2) + Zout.num_approx₁ + Zout.num_approx₂ + Zout.∂num_approx
+            @variable(model,-1.0 <= x[1:var_num] <= 1.0)
             @constraint(model,G1[1:end .!= top_index,:]*x[1:size(Zout.Z₁.G,2)] .<= (c1[1:end .!= top_index] .-dist))
             
             # Additional (but not that helpful) constraints
             #@constraint(model,G2*x .<= c2)
             #@constraint(model, n2_G*x == n2_c)
+            # Constraint Formulation for:
+            # Z₁ = Z₂ + ∂Z <-> G₁*x+c₁ = (G₂+∂G)*x+(c₂+∂c)
+            # <-> c₁ - c₂ - ∂c = (G₂+∂G-G₁)*x
+
+            if !naive
+
+                G2 = copy(Zout.∂Z.G)
+                offset = 1
+                G2[:,offset:input_dim] .+= Zout.Z₂.G[:,1:input_dim] .- Zout.Z₁.G[:,1:input_dim]
+                offset += input_dim
+                G2[:,offset:(offset+Zout.num_approx₁-1)] .-= Zout.Z₁.G[:,(input_dim+1):end]
+                offset += Zout.num_approx₁
+                G2[:,offset:(offset+Zout.num_approx₂-1)] .+= Zout.Z₂.G[:,(input_dim+1):end]
+                @constraint(model,
+                    G2*x .== (Zout.Z₁.c .- Zout.∂Z.c .- Zout.Z₂.c)
+                )
+            end
+
+            # input_vector = rand([-1.0,1.0],input_dim)
+
+            # G_current = Zout.Z₁.G[[5,8],(input_dim+1):end]
+            # c_update = Zout.Z₁.G[[5,8],1:input_dim]*input_vector
+            # zono1 = LazySets.Zonotope(Zout.Z₁.c[[5,8]]+c_update,G_current)
+
+            # G_current = Zout.Z₂.G[[5,8],(input_dim+1):end]
+            # c_update = Zout.Z₂.G[[5,8],1:input_dim]*input_vector
+            # zono2 = LazySets.Zonotope(Zout.Z₂.c[[5,8]]+c_update,G_current)
+
+            # G_zono3 = - Zout.∂Z.G[[5,8],:]
+            # G_zono3[:,1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[[5,8],:]
+            # G_current = G_zono3[:,(input_dim+1):end]
+            # c_update = G_zono3[:,1:input_dim]*input_vector
+            # zono3 = LazySets.Zonotope(Zout.Z₁.c[[5,8]] .- Zout.∂Z.c[[5,8]]+c_update,G_current)
+
+            # G_current = Zout.∂Z.G[[5,8],(input_dim+1):end]
+            # c_update = Zout.∂Z.G[[5,8],1:input_dim]*input_vector
+            # ∂zono = LazySets.Zonotope(Zout.∂Z.c[[5,8]]+c_update,G_current)
+
+            # G_zono∂alt = zeros(2,size(Zout.Z₁.G,2)+Zout.num_approx₂)
+            # G_zono∂alt[:,1:size(Zout.Z₁.G,2)] .= Zout.Z₁.G[[5,8],:]
+            # G_zono∂alt[:,1:input_dim] .-= Zout.Z₂.G[[5,8],1:input_dim]
+            # G_zono∂alt[:,(size(Zout.Z₁.G,2)+1):end] .-= Zout.Z₂.G[[5,8],(input_dim+1):end]
+            # G_current = G_zono∂alt[:,(input_dim+1):end]
+            # c_update = G_zono∂alt[:,1:input_dim]*input_vector
+            # zono∂alt = LazySets.Zonotope(Zout.Z₁.c[[5,8]]-Zout.Z₂.c[[5,8]]+c_update,G_current)
+            # plt = plot(zono1, label="Z₁",alpha=0.3)
+            # plot!(zono2, label="Z₂",alpha=0.3)
+            # plot!(zono3, label="Z₂'",alpha=0.3)
+            # plot!(∂zono, label="∂Z",alpha=0.3)
+            # plot!(zono∂alt, label="∂Z'",alpha=0.3)
+            # gui(plt)
             
             
             @objective(model,Max,0)
@@ -159,17 +203,33 @@ function get_top1_property(;scale=one(Float64),naive=false)
             #print("Returning from GLPK")
             
             if termination_status(model) == MOI.INFEASIBLE
-                #println("$top_index INFEASIBLE")
+                println("$top_index INFEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
                     verification_status[(top_index,other_index)]=true
                 end
             else
+                println("$top_index FEASIBLE")
                 #println("FEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
                     if other_index != top_index && !haskey(verification_status, (top_index,other_index))
+                        # a1 = zeros(var_num)
+                        # input_dim = size(Zin.Z₂.G,2)
+                        # #print(input_dim)
+                        # a1[1:input_dim] .= Zout.Z₂.G[other_index,1:input_dim].-Zout.Z₂.G[top_index,1:input_dim]
+                        # offset = input_dim + Zout.num_approx₁ + 1
+                        # a1[offset:(offset + Zout.num_approx₂-1)] .= Zout.Z₂.G[other_index,(input_dim+1):end].-Zout.Z₂.G[top_index,(input_dim+1):end]
+                        # a2 = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
+                        # a2[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
+                        # plt = plot([a1,a2])
+                        # gui(plt)
                         if naive
-                            a = zeros(size(Zout.∂Z.G,2))
-                            a[1:size(Zout.Z₂.G,2)] = Zout.Z₂.G[other_index,:]-Zout.Z₂.G[top_index,:]
+                            a = zeros(var_num)
+                            input_dim = size(Zin.Z₂.G,2)
+                            #print(input_dim)
+                            a[1:input_dim] .= Zout.Z₂.G[other_index,1:input_dim].-Zout.Z₂.G[top_index,1:input_dim]
+                            offset = input_dim + Zout.num_approx₁ + 1
+                            a[offset:(offset + Zout.num_approx₂-1)] .= Zout.Z₂.G[other_index,(input_dim+1):end].-Zout.Z₂.G[top_index,(input_dim+1):end]
+                            #plot(a)
                         else
                             a = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
                             a[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
@@ -183,7 +243,7 @@ function get_top1_property(;scale=one(Float64),naive=false)
                         threshold = if naive
                             Zout.Z₂.c[top_index]-Zout.Z₂.c[other_index]
                         else
-                            threshold = Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
+                            Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
                         end
                         @assert termination_status(model) != MOI.INFEASIBLE
                         if termination_status(model) != MOI.OPTIMAL
@@ -196,6 +256,8 @@ function get_top1_property(;scale=one(Float64),naive=false)
                                 end
                                 continue
                         end
+                        #println("Value: $(objective_value(model))")
+                        #println("Threshold: $threshold")
                         if objective_value(model) < threshold
                             verification_status[(top_index,other_index)]=true
                         else
