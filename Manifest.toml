@@ -715,8 +715,8 @@ version = "0.1.6"
 
 [[deps.VNNLib]]
 deps = ["LinearAlgebra", "MLStyle", "Mmap", "ProtoBuf", "SymbolicUtils", "Tokenize"]
-git-tree-sha1 = "b7ba8aa07c25daa6e1a0ed79ecd792a0882495f0"
-repo-rev = "ce9cc82"
+git-tree-sha1 = "b825eb0d5fd2ef3d4d284e51feab682293ba1793"
+repo-rev = "bc097ea"
 repo-url = "https://github.com/samysweb/VNNLib.jl"
 uuid = "286915b0-5841-4eea-9013-d818f395ad8c"
 version = "0.2.2"

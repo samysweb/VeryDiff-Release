@@ -102,13 +102,15 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         ∂lower = @view ∂bounds[:,1]
         ∂upper = @view ∂bounds[:,2]
 
+        zero_diff = ∂upper .== 0.0 .&& ∂lower .== 0.0
+
         # Compute Phase Behaviour
-        neg₁ = (upper₁ .<= 0.0)
-        pos₁ = (lower₁ .>= 0.0)
-        any₁ = (!).(neg₁) .&& (!).(pos₁)
-        neg₂ = (upper₂ .<= 0.0)
-        pos₂ = (lower₂ .>= 0.0)
-        any₂ = (!).(neg₂) .&& (!).(pos₂)
+        neg₁ = (upper₁ .<= 0.0) .&& (!).(zero_diff)
+        pos₁ = (lower₁ .>= 0.0) .&& (!).(zero_diff)
+        any₁ = (!).(neg₁) .&& (!).(pos₁) .&& (!).(zero_diff)
+        neg₂ = (upper₂ .<= 0.0) .&& (!).(zero_diff)
+        pos₂ = (lower₂ .>= 0.0) .&& (!).(zero_diff)
+        any₂ = (!).(neg₂) .&& (!).(pos₂) .&& (!).(zero_diff)
     
         crossing_new_generator = (any₁ .&& (any₂ .|| pos₂)) .|| (pos₁ .&& any₂)
 
@@ -144,7 +146,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         # Ĝ[selector] .= 0.0
         # ĉ[selector] .= 0.0
 
-        check = (neg₁ .& neg₂)
+        check = (neg₁ .& neg₂) .| zero_diff
 
         # Neg Pos:
         selector .= neg₁ .& pos₂
@@ -276,6 +278,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         selector .= any₁ .&& any₂
         instable_new_generators += count(selector)
         if any(selector)
+            # Find cases where ∂upper and ∂lower are 0
             if DEBUG_ANY_ANY
                 # println("ANY_ANY")
                 Ĝ[selector,:] .= 0.0
@@ -292,7 +295,7 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
                 α ./= (α .- ∂lower[selector])
                 # TODO: what's this?
                 α .= clamp.(α,0.0,1.0)
-                @assert all(α .>= 0.0) && all(α .<= 1.0)
+                @assert all(α .>= 0.0) && all(α .<= 1.0) "Alpha had wrong values: $(α)"
                 Ĝ[selector,1:(input_dim+Z.num_approx₁)] .= α .* (@view Z.∂Z.G[selector,1:(input_dim+Z.num_approx₁)])
                 if Z.num_approx₂ > 0
                     Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+Z.num_approx₂] .= α .* (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+1:input_dim+Z.num_approx₁+Z.num_approx₂])
