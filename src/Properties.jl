@@ -16,6 +16,7 @@ function get_epsilon_property(epsilon;focus_dim=nothing)
         else
             maximum(abs.(out_bounds)),argmax(abs.(out_bounds))[1]
         end
+        #println("Distance Bound: $distance_bound")
         if distance_bound > epsilon
             cex_input = Zin.Z₁.c
             sample_distance = get_sample_distance(N1, N2, cex_input, focus_dim)
@@ -33,7 +34,7 @@ function get_epsilon_property(epsilon;focus_dim=nothing)
             end
             # end
             if sample_distance>epsilon
-                return false, (Zin.Z₁.c, (N1(cex_input),N2(cex_input),sample_distance)), nothing, nothing, distance_bound
+                return false, (cex_input, (N1(cex_input),N2(cex_input),sample_distance)), nothing, nothing, distance_bound
             end
 
 
@@ -372,6 +373,14 @@ function epsilon_split_heuristic(Zin,Zout,heuristics_info,distance_indices)
     #print(size(relevant_dimensions))
     if NEW_HEURISTIC
         diff_weights = sum(abs,Zin.Z₁.G,dims=1)[1,:].*sum(abs,(abs.(Zout.Z₁.G)*abs.(Zout.Z₁.influence').+abs.(Zout.Z₂.G)*abs.(Zout.Z₂.influence')),dims=1)[1,:]
+        # influence1 = sum(abs,(abs.(Zout.∂Z.G[:,1:input_dim])*(abs.(Zout.Z₁.influence'[1:input_dim,:].+Zout.Z₂.influence'[1:input_dim,:]))),dims=1)[1,:]
+        # influence2 = sum(abs,(abs.(Zout.∂Z.G[:,(input_dim+1):(input_dim+Zout.num_approx₁)])*(abs.(Zout.Z₁.influence'[(input_dim+1):end,:]))),dims=1)[1,:]
+        # influence3 = sum(abs,(abs.(Zout.∂Z.G[:,(input_dim+Zout.num_approx₁+1):(input_dim+Zout.num_approx₁+Zout.num_approx₂)])*(abs.(Zout.Z₂.influence'[(input_dim+1):end,:]))),dims=1)[1,:]
+        # diff_weights = sum(abs, Zin.Z₁.G,dims=1)[1,:].*(
+        #     influence1 .+
+        #     influence2 .+
+        #     influence3
+        # )
     else
         diff_weights = sum(abs, (Zout.Z₁.G[:,1:input_dim] .- Zout.Z₂.G[:,1:input_dim] ),dims=1)[1,:]
         diff_weights ./= norm(diff_weights,2)
