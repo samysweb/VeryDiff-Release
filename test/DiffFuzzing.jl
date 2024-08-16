@@ -27,9 +27,10 @@ function get_weighted_random_vector1(values, weights::Vector{Int},size)
     return result
 end
 
-NET_COUNT = 0
 @timeit VeryDiff.to "Fuzzing" begin
+NET_COUNT = 0
 while true
+    global NET_COUNT
     next_seed = rand(1:9999)
     Random.seed!(next_seed);
     println("[FUZZER] SEED: $(next_seed)")
