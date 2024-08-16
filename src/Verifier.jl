@@ -61,6 +61,7 @@ function verify_network(
     )
     end
     @timeit to "Verify" begin
+    @Debugger.propagation_init_hook(N, prop_state)
     #if single_threaded
     worker_function(work_queue, 1, prop_state,N,N1,N2, property_check, split_heuristic,num_threads;timeout=timeout)
     # else

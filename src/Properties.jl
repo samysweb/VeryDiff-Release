@@ -111,7 +111,7 @@ function get_top1_property(;scale=one(Float64),naive=false)
         else
             dist=0.0
         end
-
+        any_feasible = false
         for top_index in 1:size(Zout.Z₁,1)
             # TODO: Construct LP that ensures that top_index is maximal in N1
             G1 = Zout.Z₁.G .- Zout.Z₁.G[top_index:top_index,:]
@@ -137,7 +137,6 @@ function get_top1_property(;scale=one(Float64),naive=false)
             set_time_limit_sec(model, 10)
             var_num = size(Zin.Z₁.G,2) + Zout.num_approx₁ + Zout.num_approx₂ + Zout.∂num_approx
             @variable(model,-1.0 <= x[1:var_num] <= 1.0)
-            @constraint(model,G1[1:end .!= top_index,:]*x[1:size(Zout.Z₁.G,2)] .<= (c1[1:end .!= top_index] .-dist))
             
             # Additional (but not that helpful) constraints
             #@constraint(model,G2*x .<= c2)
@@ -194,7 +193,9 @@ function get_top1_property(;scale=one(Float64),naive=false)
             # plot!(zono∂alt, label="∂Z'",alpha=0.3)
             # gui(plt)
             
+            Debugger.@inspect_pre_top1_model model
             
+            @constraint(model,G1[1:end .!= top_index,:]*x[1:size(Zout.Z₁.G,2)] .<= (c1[1:end .!= top_index] .-dist))
             @objective(model,Max,0)
             
             #@objective(model, Max, sum(Zout.Z₁.G*x[1:size(Zout.Z₁.G,2)]+Zout.Z₁.c,dim=2))
@@ -209,6 +210,7 @@ function get_top1_property(;scale=one(Float64),naive=false)
                     verification_status[(top_index,other_index)]=true
                 end
             else
+                any_feasible = true
                 #println("$top_index FEASIBLE")
                 #println("FEASIBLE")
                 for other_index in 1:size(Zout.Z₁,1)
@@ -223,29 +225,20 @@ function get_top1_property(;scale=one(Float64),naive=false)
                         # a2[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
                         # plt = plot([a1,a2])
                         # gui(plt)
-                        if naive
-                            a = zeros(var_num)
-                            input_dim = size(Zin.Z₂.G,2)
-                            #print(input_dim)
-                            a[1:input_dim] .= Zout.Z₂.G[other_index,1:input_dim].-Zout.Z₂.G[top_index,1:input_dim]
-                            offset = input_dim + Zout.num_approx₁ + 1
-                            a[offset:(offset + Zout.num_approx₂-1)] .= Zout.Z₂.G[other_index,(input_dim+1):end].-Zout.Z₂.G[top_index,(input_dim+1):end]
-                            #plot(a)
-                        else
-                            a = Zout.∂Z.G[top_index,:]-Zout.∂Z.G[other_index,:]
-                            a[1:size(Zout.Z₁.G,2)] .+= Zout.Z₁.G[other_index,:]-Zout.Z₁.G[top_index,:]
-                        end
+                        a = zeros(var_num)
+                        input_dim = size(Zin.Z₂.G,2)
+                        #print(input_dim)
+                        a[1:input_dim] .= Zout.Z₂.G[other_index,1:input_dim].-Zout.Z₂.G[top_index,1:input_dim]
+                        offset = input_dim + Zout.num_approx₁ + 1
+                        a[offset:(offset + Zout.num_approx₂-1)] .= Zout.Z₂.G[other_index,(input_dim+1):end].-Zout.Z₂.G[top_index,(input_dim+1):end]
+                        @objective(model,Max,a'*x)
                         violation_difference = a
                         #abs.(Zout.Z₁.G[top_index,1:input_dim] .- Zout.Z₂.G[top_index,1:input_dim]) .+ abs.(Zout.Z₁.G[other_index,1:input_dim] .- Zout.Z₂.G[other_index,1:input_dim])
-                        @objective(model,Max,a'*x)
+                        
                         # print("Calling GLPK (timeout=$(time_limit_sec(model)))")
                         optimize!(model)
                         # print("Returning from GLPK")
-                        threshold = if naive
-                            Zout.Z₂.c[top_index]-Zout.Z₂.c[other_index]
-                        else
-                            Zout.Z₁.c[top_index]-Zout.Z₁.c[other_index]+Zout.∂Z.c[other_index]-Zout.∂Z.c[top_index]
-                        end
+                        threshold = Zout.Z₂.c[top_index]-Zout.Z₂.c[other_index]
                         @assert termination_status(model) != MOI.INFEASIBLE
                         if termination_status(model) != MOI.OPTIMAL
                                 #top_dimension_importance[top_index] += 1
@@ -297,6 +290,7 @@ function get_top1_property(;scale=one(Float64),naive=false)
             end
             # generator_importance .*= sum(abs,Zin.Z₁.G,dims=1)[1,:]
         end
+        @assert any_feasible "One output must be maximal, but our analysis says there is no maximum -- this smells like a bug!"
         # if property_satisfied
         #     println("Zonotope Top 1 Equivalent!")
         # end

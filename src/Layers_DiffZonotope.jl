@@ -7,6 +7,10 @@ function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P
     return @timeit to "DiffZonotope_DenseProp" begin
     #println("Dense")
     L1, ∂L, L2 = Ls
+
+    Debugger.@pre_diffzono_prop_hook Z context="Pre Dense"
+    Debugger.@diff_layer_inspection_hook Ls
+
     if USE_DIFFZONO
         ∂G = Matrix{Float64}(undef, size(L1.W,1), size(Z.∂Z.G,2))
         mul!(∂G, L1.W, Z.∂Z.G)
@@ -30,10 +34,12 @@ function propagate_diff_layer(Ls :: Tuple{Dense,Dense,Dense}, Z::DiffZonotope, P
         mul!(∂c, ∂L.W, Z.Z₂.c, 1.0, 1.0)
         ∂c .+= ∂L.b
         ∂Z_new = Zonotope(∂G,∂c,Z.∂Z.influence)
-        return DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),∂Z_new,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
+        diff_zono_new = DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),∂Z_new,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
     else
-        return DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),Z.∂Z,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
+        diff_zono_new = DiffZonotope(L1(Z.Z₁,P),L2(Z.Z₂,P),Z.∂Z,Z.num_approx₁,Z.num_approx₂,Z.∂num_approx)
     end
+    Debugger.@post_diffzono_prop_hook diff_zono_new context="Post Dense"
+    return diff_zono_new
     end
 end
 
@@ -47,6 +53,8 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
     return @timeit to "DiffZonotope_ReLUProp" begin
     #println("ReLU")
     L1, _, L2 = Ls
+    Debugger.@pre_diffzono_prop_hook Z context="Pre ReLU"
+    Debugger.@diff_layer_inspection_hook Ls
     input_dim = size(Z.Z₂,2)-Z.num_approx₂
 
     # Compute Bounds
@@ -105,14 +113,46 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         zero_diff = ∂upper .== 0.0 .&& ∂lower .== 0.0
 
         # Compute Phase Behaviour
-        neg₁ = (upper₁ .<= 0.0) .&& (!).(zero_diff)
-        pos₁ = (lower₁ .>= 0.0) .&& (!).(zero_diff)
-        any₁ = (!).(neg₁) .&& (!).(pos₁) .&& (!).(zero_diff)
-        neg₂ = (upper₂ .<= 0.0) .&& (!).(zero_diff)
-        pos₂ = (lower₂ .>= 0.0) .&& (!).(zero_diff)
-        any₂ = (!).(neg₂) .&& (!).(pos₂) .&& (!).(zero_diff)
+        check = copy(zero_diff)
+        
+        neg_neg = (upper₁ .<= 0.0) .&& (upper₂ .<= 0.0) .&& .!check
+        check .|= neg_neg
+        neg_pos = (upper₁ .<= 0.0) .&& (lower₂ .>= 0.0) .&& .!check
+        check .|= neg_pos
+        pos_neg = (lower₁ .>= 0.0) .&& (upper₂ .<= 0.0) .&& .!check
+        check .|= pos_neg
+        pos_pos = (lower₁ .>= 0.0) .&& (lower₂ .>= 0.0) .&& .!check
+        check .|= pos_pos
+        any_neg = (lower₁ .< 0.0) .&& (upper₁ .> 0.0) .&& (upper₂ .<= 0.0) .&& .!check
+        check .|= any_neg
+        neg_any = (upper₁ .<= 0.0) .&& (lower₂ .< 0.0) .&& (upper₂ .> 0.0) .&& .!check
+        check .|= neg_any
+        any_pos = (lower₁ .< 0.0) .&& (upper₁ .> 0.0) .&& (lower₂ .>= 0.0) .&& .!check
+        check .|= any_pos
+        pos_any = (lower₁ .>= 0.0) .&& (lower₂ .< 0.0) .&& (upper₂ .> 0.0) .&& .!check
+        check .|= pos_any
+        any_any = (lower₁ .< 0.0) .&& (upper₁ .> 0.0) .&& (lower₂ .< 0.0) .&& (upper₂ .> 0.0) .&& .!check
+        check .|= any_any
+        @assert all(check) "Not all cases covered"
+
+        if !all((zero_diff .+ neg_neg .+ neg_pos .+ neg_any .+ pos_neg .+ pos_pos .+ pos_any .+ any_neg .+ any_pos .+ any_any) .== 1)
+            println("For one of the input dimensions multiple cases were selected -- this smells like a bug!")
+            multiple = (zero_diff .+ neg_neg .+ neg_pos .+ neg_any .+ pos_neg .+ pos_pos .+ pos_any .+ any_neg .+ any_pos .+ any_any) .!= 1
+            println("Indices: ", findall(multiple))
+            println("Neg Neg: ", neg_neg[multiple])
+            println("Neg Pos: ", neg_pos[multiple])
+            println("Neg Any: ", neg_any[multiple])
+            println("Pos Neg: ", pos_neg[multiple])
+            println("Pos Pos: ", pos_pos[multiple])
+            println("Pos Any: ", pos_any[multiple])
+            println("Any Neg: ", any_neg[multiple])
+            println("Any Pos: ", any_pos[multiple])
+            println("Any Any: ", any_any[multiple])
+            println("Zero Di: ", zero_diff[multiple])
+            throw("Multiple cases selected!")
+        end
     
-        crossing_new_generator = (any₁ .&& (any₂ .|| pos₂)) .|| (pos₁ .&& any₂)
+        crossing_new_generator = any_pos .| pos_any .| any_any
 
         # Compute new dimensions
         num_approx₁_additional = num_approx₁-Z.num_approx₁
@@ -145,33 +185,35 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         # selector .= neg₁ .& neg₂
         # Ĝ[selector] .= 0.0
         # ĉ[selector] .= 0.0
+        Debugger.@diffrelu_case_hook zero_diff context="Zero Diff"
+        Debugger.@diffrelu_case_hook neg_neg context="Neg Neg"
 
-        check = (neg₁ .& neg₂) .| zero_diff
 
         # Neg Pos:
-        selector .= neg₁ .& pos₂
+        selector .= neg_pos
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Neg Pos"
             # println("NEG_POS")
             Ĝ[selector,1:input_dim] .-= (@view Z₂_new.G[selector,1:input_dim])
             Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= (@view Z₂_new.G[selector,input_dim+1:end])
             ĉ[selector] .-= (@view Z₂_new.c[selector])
-            check .|= selector
         end
 
         # Pos Neg:
-        selector .= pos₁ .& neg₂
+        selector .= pos_neg
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Pos Neg"
             # println("POS_NEG")
             Ĝ[selector,1:input_dim+num_approx₁] .+= (@view Z₁_new.G[selector,1:end])
             ĉ[selector] .+= (@view Z₁_new.c[selector])
-            check .|= selector
         end
 
         # Pos Pos:
         # This just copies the row from the input ∂Z
         # We also need this for Any Pos and Pos Any and thus we copy for those as well
-        selector .= pos₁ .&& (pos₂ .|| any₂) .|| (any₁ .&& pos₂)
+        selector .= pos_pos .| any_pos .| pos_any
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Pos Pos+"
             # println("POS_POS")
             Ĝ[selector,1:input_dim+Z.num_approx₁] .= (@view Z.∂Z.G[selector,1:input_dim+Z.num_approx₁])
             if Z.num_approx₂ > 0
@@ -181,35 +223,35 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
                 Ĝ[selector,input_dim+num_approx₁+num_approx₂+1:input_dim+num_approx₁+num_approx₂+Z.∂num_approx] .= (@view Z.∂Z.G[selector,input_dim+Z.num_approx₁+Z.num_approx₂+1:end])
             end
             ĉ[selector] .= (@view Z.∂Z.c[selector])
-            check .|= selector
         end
 
         # Any Neg
-        selector .= any₁ .&& neg₂
+        selector .= any_neg
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Any Neg"
             # println("ANY_NEG")
             Ĝ[selector,1:(input_dim+num_approx₁)] .= (@view Z₁_new.G[selector,1:end])
             ĉ[selector] .= (@view Z₁_new.c[selector])
-            check .|= selector
         end
 
         # Neg Any
-        selector .= neg₁ .&& any₂
+        selector .= neg_any
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Neg Any"
             # println("NEG_ANY")
             Ĝ[selector,1:input_dim] .-= (@view Z₂_new.G[selector,1:input_dim])
             Ĝ[selector,input_dim+num_approx₁+1:input_dim+num_approx₁+num_approx₂] .-= (@view Z₂_new.G[selector,input_dim+1:end])
             ĉ[selector] .-= (@view Z₂_new.c[selector])
-            check .|= selector
         end
 
         instable_new_generators = 0
 
         generator_offset = input_dim+num_approx₁+num_approx₂+Z.∂num_approx+1
         # Any Pos
-        selector .= any₁ .&& pos₂
+        selector .= any_pos
         instable_new_generators += count(selector)
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Any Pos"
             if DEBUG_ANY_POS
                 # println("ANY_POS")
                 Ĝ[selector,:] .= 0.0
@@ -236,13 +278,13 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
                 ĉ[selector] .+= α
                 generator_offset += count_generators
             end
-            check .|= selector
         end
 
         # Pos Any
-        selector .= pos₁ .&& any₂
+        selector .= pos_any
         instable_new_generators += count(selector)
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Pos Any"
             if DEBUG_POS_ANY
                 # println("POS_ANY")
                 Ĝ[selector,:] .= 0.0
@@ -271,13 +313,13 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
                 ĉ[selector] .-= α
                 generator_offset += count_generators
             end
-            check .|= selector
         end
 
         # Any Any
-        selector .= any₁ .&& any₂
+        selector .= any_any
         instable_new_generators += count(selector)
         if any(selector)
+            Debugger.@diffrelu_case_hook selector context="Any Any"
             # Find cases where ∂upper and ∂lower are 0
             if DEBUG_ANY_ANY
                 # println("ANY_ANY")
@@ -315,14 +357,6 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
                 ĉ[selector] .+= α 
                 ĉ[selector] .-= μ
             end
-            check .|= selector
-        end
-        if !all(check)
-            println("Missed rows:")
-            println("Bounds1: ",bounds₁[(!).(check),:])
-            println("Bounds2: ",bounds₂[(!).(check),:])
-            println("∂Bounds: ",∂bounds[(!).(check),:])
-            @assert false
         end
 
         if FIRST_ROUND
@@ -330,24 +364,12 @@ function propagate_diff_layer(Ls :: Tuple{ReLU,ReLU,ReLU}, Z::DiffZonotope, P::P
         end
 
         ∂Z_new = Zonotope(Ĝ, ĉ, Z.∂Z.influence)
-        return DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,num_approx₁,num_approx₂,∂num_approx)
+        diff_zono_new = DiffZonotope(Z₁_new,Z₂_new, ∂Z_new,num_approx₁,num_approx₂,∂num_approx)
     else
-        return DiffZonotope(Z₁_new,Z₂_new,Z.∂Z,num_approx₁,num_approx₂,Z.∂num_approx)
+        diff_zono_new = DiffZonotope(Z₁_new,Z₂_new,Z.∂Z,num_approx₁,num_approx₂,Z.∂num_approx)
     end
-
-    #α = ∂upper ./ (∂upper - ∂lower)
-    # λ = ifelse.((upper₁.<=0.0 .&& upper₂ .<= 0.0) , 0.0, ifelse.(lower₁.>=0.0 .&& lower₂ .>= 0.0, 1.0, ifelse.(∂upper .<= 0.0,0.0,α)))
-    
-    # Difference between N1 - N2
-    # Case 0: Both instable
-    # Case 1: N1 zero -> Δ = 0-max(0,x1 - Δᵢ) = 0 or Δᵢ - x1 >= Δᵢ
-    #δ = 0.5 .* max.(∂upper,-∂lower) #ifelse.(∂upper>-∂lower, 0.5*∂upper, -0.5*∂lower
-    #γ = crossing .* (-δ .- λ .*∂lower )
-    #ĉ = λ .* Z.∂Z.c + γ
-    # Ĝ = λ .* Z.∂Z.G
-    #Ĝ[:,offset_cols:(offset_cols+num_cols)] .= λ .* (@view Z.∂Z.G[:,offset_cols_z:end])
-    # New Approx columns
-    #Ĝ[:,offset_cols:end] .= (δ.+ sign.(δ)*1e-5) .* (@view I(output_dim)[:, crossing])
+    Debugger.@post_diffzono_prop_hook diff_zono_new context="Post ReLU"
+    return diff_zono_new
     end
 end
 
