@@ -9,6 +9,11 @@ using Gurobi
 Random.seed!(1234);
 VeryDiff.NEW_HEURISTIC = false
 
+GRB_ENV = Gurobi.Env()
+GRBsetintparam(GRB_ENV, "OutputFlag", 0)
+GRBsetintparam(GRB_ENV, "LogToConsole", 0)
+GRBsetintparam(GRB_ENV, "Threads", 0)
+
 # if !VeryDiff.Debugger.DEBUG_STATE.active
 #     println("WARNING: IT IS RECOMMENDED TO RUN THIS SCRIPT WITH DEBUGGING ENABLED")
 #     println("THIS INCREASES THE CHANCE OF FINDING ERRORS IN THE CODE!")
@@ -22,12 +27,17 @@ function get_weighted_random_vector1(values, weights::Vector{Int},size)
     return result
 end
 
+NET_COUNT = 0
 @timeit VeryDiff.to "Fuzzing" begin
-for i in 1:15
-    println("Networks $(i)")
+while true
+    next_seed = rand(1:9999)
+    Random.seed!(next_seed);
+    println("[FUZZER] SEED: $(next_seed)")
+    NET_COUNT += 1
+    println("[FUZZER] NET COUNT: $(NET_COUNT)")
     layers1 = Layer[]
     layers2 = Layer[]
-    input_dim = rand(1:20)
+    input_dim = rand(1:50)
     output_dim = 10
     cur_dim = input_dim
     n = rand(2:10)
@@ -41,17 +51,31 @@ for i in 1:15
         end
         W1 = randn(Float64,(new_dim,cur_dim))
         b1 = randn(Float64,new_dim)
-        W2 = randn(Float64,(new_dim,cur_dim))
-        b2 = randn(Float64,new_dim)
+        net_choice = get_weighted_random_vector1([1,2,3],[1,1,1],1)[1]
+        println("NET CHOICE: $(net_choice)")
+        if net_choice == 1 # Independent weights
+            W2 = randn(Float64,(new_dim,cur_dim))
+            b2 = randn(Float64,new_dim)
+            zero_one_rows1 = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim)
+            simple_rows = get_weighted_random_vector1([0.0,1.0],[4,6],new_dim) .* rand([-1.0,0.0,1.0],(new_dim,cur_dim))
+            W1 = W1 .* zero_one_rows1 .+ (1 .- zero_one_rows1) .* simple_rows
+            zero_one_rows2 = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim)
+            simple_rows = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim) .* rand([-1.0,0.0,1.0],(new_dim,cur_dim))
+            W2 = W2 .* zero_one_rows2 .+ (1 .- zero_one_rows2) .* simple_rows
+            b1 = b1 .* zero_one_rows1
+            b2 = b2 .* zero_one_rows2
+        elseif net_choice == 2 # Pruned weights
+            W2 = copy(W1)
+            b2 = copy(b1)
+            zero_one_rows2 = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim)
+            simple_rows = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim) .* rand([-1.0,0.0,1.0],(new_dim,cur_dim))
+            W2 = W2 .* zero_one_rows2 .+ (1 .- zero_one_rows2) .* simple_rows
+            b2 = b2 .* zero_one_rows2
+        else
+            W2 = W1 + 1e-1*randn(Float64,(new_dim,cur_dim))
+            b2 = b1 + 1e-1*randn(Float64,new_dim)
+        end
 
-        zero_one_rows1 = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim)
-        simple_rows = get_weighted_random_vector1([0.0,1.0],[4,6],new_dim) .* rand([-1.0,0.0,1.0],(new_dim,cur_dim))
-        W1 = W1 .* zero_one_rows1 .+ (1 .- zero_one_rows1) .* simple_rows
-        zero_one_rows2 = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim)
-        simple_rows = get_weighted_random_vector1([0.0,1.0],[1,9],new_dim) .* rand([-1.0,0.0,1.0],(new_dim,cur_dim))
-        W2 = W2 .* zero_one_rows2 .+ (1 .- zero_one_rows2) .* simple_rows
-        b1 = b1 .* zero_one_rows1
-        b2 = b2 .* zero_one_rows2
 
         cur_dim = new_dim
         relus += new_dim
@@ -87,20 +111,19 @@ for i in 1:15
             push!(∂bounds,(zono_optimize(-1.0,Z.∂Z,d),zono_optimize(1.0,Z.∂Z,d)))
         end
         threshold=1e-4
-        for k in 1:1000
+        for k in 1:10000
             #x = 2*0.1*rand(Float64,input_dim).-0.1
             x_in = rand(Float64,input_dim)
             x = Zin.G*x_in + Zin.c
             y1 = N1(x)
             y2 = N2(x)
-            model = Model(Gurobi.Optimizer)
+            model = Model(() -> Gurobi.Optimizer(GRB_ENV))
             set_optimizer_attribute(model, "OutputFlag", 0)
             @variable(model, -1 <= lp_x[1:size(Z.∂Z.G,2)] <= 1)
             @constraint(model, lp_x[1:input_dim] .== x_in)
             @constraint(model, Z.∂Z.G*lp_x .+ Z.∂Z.c .== y1.-y2)
             @constraint(model, Z.Z₁.G*lp_x[1:size(Z.Z₁.G,2)] .+ Z.Z₁.c .== y1)
             offset = size(Z.Z₁.G,2)+1
-            println(Z.num_approx₂)
             @constraint(model, 
                 Z.Z₂.G[:,1:input_dim]*lp_x[1:input_dim] .+
                 Z.Z₂.G[:,input_dim+1:end]*lp_x[offset:offset+Z.num_approx₂-1] .+
@@ -112,7 +135,7 @@ for i in 1:15
                 println("Solver Status: ", termination_status(model))
                 error =true
             end
-            println("Solver Status: ", termination_status(model))
+            # println("Solver Status: ", termination_status(model))
 
             for d in 1:output_dim
                 if y1[d] < bounds1[d][1]-threshold || y1[d] > bounds1[d][2]+threshold
