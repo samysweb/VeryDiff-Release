@@ -61,9 +61,9 @@ function (L::ReLU)(Z :: Zonotope, P :: PropState; bounds = nothing)
         # print(size(influence_new))
         # print(size(Z.influence * Z.G[crossing,:]'))
         @timeit to "Multiply" begin
-        influence_new[:,(size(Z.influence,2)+1):end] .=  Z.influence * (@view Z.G[crossing,:])'
+        influence_new[:,(size(Z.influence,2)+1):end] .=  abs.(Z.influence) * abs.(@view Z.G[crossing,:])'
         end
-        #foreach(normalize!, eachcol(@view influence_new[:,(size(Z.influence,2)+1):end]))
+        # foreach(normalize!, eachcol(@view influence_new[:,(size(Z.influence,2)+1):end]))
     else
         influence_new = Z.influence
     end
