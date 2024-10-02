@@ -74,8 +74,21 @@ function get_epsilon_property_naive(epsilon;focus_dim=nothing)
     end
 end
 
-function get_top1_property(;scale=one(Float64),naive=false)
+TOP1_FOUND_CONCRETE_DELTA = false
+
+function get_top1_property(;delta=zero(Float64),naive=false)
+    if !iszero(delta)
+        @assert 0.5 <= delta && delta <= 1.0
+        dist=log(delta/(1-delta))
+    else
+        dist=0.0
+    end
     return (N1, N2, Zin, Zout, verification_status) -> begin
+        global FIRST_ROUND
+        global TOP1_FOUND_CONCRETE_DELTA
+        if FIRST_ROUND
+            TOP1_FOUND_CONCRETE_DELTA = false
+        end
         if isnothing(verification_status)
             verification_status = Dict{Tuple{Int,Int},Bool}()
         end
@@ -83,11 +96,25 @@ function get_top1_property(;scale=one(Float64),naive=false)
         #generator_importance = zeros(input_dim)
         top_dimension_violation = zeros(input_dim) #size(Zout.Z₁.G,1))
         #other_dimension_importance = zeros(size(Zout.Z₁.G,1))
-        argmax_N1 = argmax(N1(Zin.Z₁.c))
+        res1 = N1(Zin.Z₁.c)
+        argmax_N1 = argmax(res1)
         argmax_N2 = argmax(N2(Zin.Z₂.c))
+        softmax_N1 = exp.(res1)/sum(exp.(res1))
         if argmax_N1 != argmax_N2
-            print("Found cex")
-            return false, (Zin.Z₁.c, (argmax_N1, argmax_N2)), nothing, nothing
+            if iszero(delta) || softmax_N1[argmax_N1] >= delta
+                println("Found cex")
+                println("N1 Probability: $(softmax_N1[argmax_N1]) >= $delta")
+                return false, (Zin.Z₁.c, (argmax_N1, argmax_N2)), nothing, nothing, 0.0
+            else
+                second_largest = sort(res1,rev=true)[2]
+                if !iszero(delta) && res1[argmax_N1]-second_largest >= dist
+                    println("Found spurious cex")
+                    println("N1 Probability: $(softmax_N1[argmax_N1]) < $delta")
+                    println("but difference $(res1[argmax_N1]-second_largest) >= $dist (approximate bound)")
+                    # println("INCONCLUSIVE")
+                    # return false, (Zin.Z₁.c, (argmax_N1, argmax_N2)), nothing, nothing, 0.0
+                end
+            end
         end
         property_satisfied = true
         distance_bound = 0.0
@@ -106,11 +133,6 @@ function get_top1_property(;scale=one(Float64),naive=false)
         #dist=log(0.1)+log(sum(exp.(out_bounds[:,1])))
         #print(out_bounds[:,1])
         #print("Distance: ",dist)
-        if !isone(scale)
-            dist=log(scale)
-        else
-            dist=0.0
-        end
         any_feasible = false
         for top_index in 1:size(Zout.Z₁,1)
             # TODO: Construct LP that ensures that top_index is maximal in N1
@@ -210,6 +232,19 @@ function get_top1_property(;scale=one(Float64),naive=false)
                     verification_status[(top_index,other_index)]=true
                 end
             else
+                
+                if !iszero(delta) && !TOP1_FOUND_CONCRETE_DELTA
+                    input = Zin.Z₁.G*value.(x[1:input_dim])+Zin.Z₁.c
+                    res1 = N1(input)
+                    argmax_N1 = argmax(res1)
+                    softmax_N1 = exp.(res1)/sum(exp.(res1))
+                    if softmax_N1[argmax_N1] >= delta
+                        println("[TOP-1] required confidence ($(softmax_N1[argmax_N1])≥$delta) is feasible for index $argmax_N1")
+                        TOP1_FOUND_CONCRETE_DELTA=true
+                    else
+                        println("[TOP-1] did not find required confidence yet.")
+                    end
+                end
                 any_feasible = true
                 #println("$top_index FEASIBLE")
                 #println("FEASIBLE")
@@ -233,14 +268,23 @@ function get_top1_property(;scale=one(Float64),naive=false)
                         a[offset:(offset + Zout.num_approx₂-1)] .= Zout.Z₂.G[other_index,(input_dim+1):end].-Zout.Z₂.G[top_index,(input_dim+1):end]
                         @objective(model,Max,a'*x)
                         violation_difference = a
-                        #abs.(Zout.Z₁.G[top_index,1:input_dim] .- Zout.Z₂.G[top_index,1:input_dim]) .+ abs.(Zout.Z₁.G[other_index,1:input_dim] .- Zout.Z₂.G[other_index,1:input_dim])
                         
-                        # print("Calling GLPK (timeout=$(time_limit_sec(model)))")
+                        threshold = Zout.Z₂.c[top_index]-Zout.Z₂.c[other_index]
+                        # If the optimal value is < threshold, then the property is satisfied
+                        # otherwise (optimal >= threshold) we may have found a counterexample
+                        if USE_GUROBI # we are using GUROBI -> set objective/bound thresholds
+                            set_optimizer_attribute(model, "Cutoff", threshold-1e-6)
+                        end
                         optimize!(model)
                         # print("Returning from GLPK")
-                        threshold = Zout.Z₂.c[top_index]-Zout.Z₂.c[other_index]
-                        @assert termination_status(model) != MOI.INFEASIBLE
-                        if termination_status(model) != MOI.OPTIMAL
+                        
+                        model_status = termination_status(model)
+                        # Model must be feasible since we did not add any constraints
+                        @assert model_status != MOI.INFEASIBLE
+                        # Model should be optimal or have reached the objective limit
+                        # any other status -> split and retry
+                        if model_status != MOI.OPTIMAL && model_status != MOI.OBJECTIVE_LIMIT
+                                println("[GUROBI] Irregular model status: $model_status")
                                 #top_dimension_importance[top_index] += 1
                                 #other_dimension_importance[other_index] += 1
                                 top_dimension_violation .+= abs.(violation_difference[1:input_dim])
@@ -252,7 +296,7 @@ function get_top1_property(;scale=one(Float64),naive=false)
                         end
                         #println("Value: $(objective_value(model))")
                         #println("Threshold: $threshold")
-                        if objective_value(model) < threshold
+                        if model_status == MOI.OBJECTIVE_LIMIT || objective_value(model) < threshold
                             verification_status[(top_index,other_index)]=true
                         else
                             distance_bound = max(distance_bound, objective_value(model))
@@ -262,16 +306,25 @@ function get_top1_property(;scale=one(Float64),naive=false)
                             argmax_N1 = argmax(res1)
                             argmax_N2 = argmax(res2)
                             softmax_N1 = exp.(res1)/sum(exp.(res1))
-                            second_most = maximum(softmax_N1[1:end .!= argmax_N1])
                             if argmax_N1 != argmax_N2
-                                println("Found cex")
-                                #println("N1: $(softmax_N1[argmax_N1]) (vs. $second_most)")
-                                #println("N2: $(softmax_N1[argmax_N2])")
-                                if isone(scale) || abs(softmax_N1[argmax_N1]/second_most) >= scale
-                                    println("N1 Scale: $(softmax_N1[argmax_N1]/second_most) >= $scale")
+                                if iszero(delta) || softmax_N1[argmax_N1] >= delta
+                                    println("Found cex")
+                                    second_most = sort(softmax_N1,rev=true)[2]
+                                    println("N1: $(softmax_N1[argmax_N1]) (vs. $second_most)")
+                                    softmax_N2 = exp.(res2)/sum(exp.(res2))
+                                    println("N2: $(softmax_N2[argmax_N2])")
+                                    println("N1 Probability: $(softmax_N1[argmax_N1]) >= $delta")
                                     return false, (input, (argmax_N1, argmax_N2)), nothing, nothing, 0.0
                                 else
-                                    println("Discared cex due to scale ($(softmax_N1[argmax_N1]/second_most) < $scale)")
+                                    second_largest = sort(res1,rev=true)[2]
+                                    if !iszero(delta) && res1[argmax_N1]-second_largest >= dist
+                                        println("Found spurious cex")
+                                        println("N1 Probability: $(softmax_N1[argmax_N1]) < $delta")
+                                        println("but difference $(res1[argmax_N1]-second_largest) >= $dist (approximate bound)")
+                                        # println("INCONCLUSIVE")
+                                        # return false, (input, (argmax_N1, argmax_N2)), nothing, nothing, 0.0
+                                    end
+                                    #println("Discared cex due to probability ($(softmax_N1[argmax_N1]) < $delta)")
                                     #top_dimension_importance[top_index] += 1
                                     #other_dimension_importance[other_index] += 1
                                     top_dimension_violation .+= abs.(violation_difference[1:input_dim])
@@ -290,7 +343,7 @@ function get_top1_property(;scale=one(Float64),naive=false)
             end
             # generator_importance .*= sum(abs,Zin.Z₁.G,dims=1)[1,:]
         end
-        @assert any_feasible "One output must be maximal, but our analysis says there is no maximum -- this smells like a bug!"
+        @assert !iszero(delta) || any_feasible "One output must be maximal, but our analysis says there is no maximum -- this smells like a bug!"
         # if property_satisfied
         #     println("Zonotope Top 1 Equivalent!")
         # end
