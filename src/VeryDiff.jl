@@ -9,17 +9,19 @@ using VNNLib
 using GLPK
 
 NEW_HEURISTIC = true
-USE_GUROBI = true
+USE_GUROBI = false
 
 USE_DIFFZONO = true
 
 # We have our own multithreadding so we don't want to use BLAS multithreadding
 function __init__()
     BLAS.set_num_threads(1)
-    GRB_ENV[] = Gurobi.Env()
-    GRBsetintparam(GRB_ENV[], "OutputFlag", 0)
-    GRBsetintparam(GRB_ENV[], "LogToConsole", 0)
-    GRBsetintparam(GRB_ENV[], "Threads", 0)
+    if USE_GUROBI
+        GRB_ENV[] = Gurobi.Env()
+        GRBsetintparam(GRB_ENV[], "OutputFlag", 0)
+        GRBsetintparam(GRB_ENV[], "LogToConsole", 0)
+        GRBsetintparam(GRB_ENV[], "Threads", 0)
+    end
     #GRBsetintparam(GRB_ENV[], "Method", 2)
     #       mnist_19_local_21.vnnlib        mnist_18_local_18
     #0 :    0.018826400587219343s/loop      0.03304489948205128s/loop
