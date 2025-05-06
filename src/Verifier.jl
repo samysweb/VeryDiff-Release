@@ -1,5 +1,7 @@
 #using Random
 
+@enum VerificationStatus UNKNOWN SAFE UNSAFE
+
 function verify_network(
     N1 :: Network,
     N2 :: Network,
@@ -8,6 +10,7 @@ function verify_network(
     split_heuristic;
     timeout=Inf)
     global FIRST_ROUND = true
+    verification_result = nothing
     # Timing
     reset_timer!(to)
     @timeit to "Initialize" begin
@@ -63,7 +66,14 @@ function verify_network(
     @timeit to "Verify" begin
     @Debugger.propagation_init_hook(N, prop_state)
     #if single_threaded
-    worker_function(work_queue, 1, prop_state,N,N1,N2, property_check, split_heuristic,num_threads;timeout=timeout)
+    verification_result = worker_function(work_queue, 1, prop_state,N,N1,N2, property_check, split_heuristic,num_threads;timeout=timeout)
+    if verification_result == SAFE
+        println("SAFE")
+    elseif verification_result == UNSAFE
+        println("UNSAFE")
+    else
+        println("UNKNOWN")
+    end
     # else
     #     worker_list = []
     #     for threadid in 1:(num_threads)
@@ -87,17 +97,18 @@ function verify_network(
     show(to)
     #common_state=nothing
     work_queue=nothing
-    nothing
+    return verification_result
 end
 
 function worker_function(work_queue, threadid, prop_state,N,N1,N2,property_check, split_heuristic, num_threads;timeout=Inf)
     try
-        thread_result = @timed worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_threads, property_check, split_heuristic, timeout=timeout)
-        println("[Thread $(threadid)] Finished in $(round(thread_result.time;digits=2))s")
-        return nothing
+        thread_result = worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_threads, property_check, split_heuristic, timeout=timeout)
+        return thread_result
     catch e
         println("[Thread $(threadid)] Caught exception: $(e)")
         showerror(stdout, e, catch_backtrace())
+        thread_result = UNKNOWN
+        return thread_result
     end
 end
 function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_threads, property_check, split_heuristic ;timeout=Inf)
@@ -108,6 +119,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
     total_zonos=0
     generated_zonos = 0
     splits = 0
+    is_verified = SAFE
     # @debug "[Thread $(threadid)] Starting worker"
     #task_queue = Queue()
     # @debug "[Thread $(threadid)] Syncing queues"
@@ -155,6 +167,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
                     @assert all(zono_bounds(Zin.Z₁)[:,1] .<= cex[1] .&& cex[1] .<= zono_bounds(Zin.Z₂)[:,2])
                     println("\nFound counterexample: $(cex)")
                     should_terminate = true
+                    is_verified = UNSAFE
                 elseif !do_not_split
                     @timeit to "Compute Split" begin
                     splits += 1
@@ -176,6 +189,7 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
             println("\n\nTIMEOUT REACHED")
             println("UNKNOWN")
             should_terminate = true
+            is_verified = UNKNOWN
         end
         # Even if we haven't done any work we may find a counterexample, but unfortunately
         # memory is bounded...
@@ -198,9 +212,11 @@ function worker_function_internal(work_queue, threadid, prop_state,N,N1,N2,num_t
     if do_not_split
         println("\n\nTIMEOUT REACHED")
         println("UNKNOWN")
+        is_verified = UNKNOWN
     end
     println("[Thread $(threadid)] Total splits: $(splits)")
     print("Processed $(total_zonos) zonotopes (Work Done: $(round(100*total_work;digits=1))%); Generated $(generated_zonos) ($(loop_time/k)s/loop)\n")
+    return is_verified
 end
 
 function split_zono(d, verification_task :: VerificationTask, work_share, verification_status, distance_bound)

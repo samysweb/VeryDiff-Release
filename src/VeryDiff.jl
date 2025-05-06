@@ -50,6 +50,7 @@ include("Layers_DiffZonotope.jl")
 include("MultiThreadding.jl")
 include("Properties.jl")
 include("Verifier.jl")
+include("Cli.jl")
 
 export Network,GeminiNetwork,Layer,Dense,ReLU,WrappedReLU
 export parse_network
