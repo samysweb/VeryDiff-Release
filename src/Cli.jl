@@ -30,6 +30,9 @@ function parse_commandline(cmd_args)
             help        =   "Timeout for verification"
             arg_type    =   Int
             default     =   0
+        "--naive"
+            help        =   "Use naive verification (without differential verification)"
+            action      =   :store_true
     end
     return parse_args(cmd_args, s)
 end
@@ -84,23 +87,35 @@ function run_cmd(args)
     property = nothing
     split_heuristic = nothing
     if epsilon != -Inf64
-        property = get_epsilon_property(epsilon)
+        if parsed_args["naive"]
+            property = get_epsilon_property_naive(epsilon)
+        else
+            property = get_epsilon_property(epsilon)
+        end
         split_heuristic = epsilon_split_heuristic
     end
     if top_1
         @assert isnothing(property) "Cannot specify both epsilon and Top-1"
-        property = get_top1_property(naive=true)
+        property = get_top1_property(naive=parsed_args["naive"])
         split_heuristic = top1_configure_split_heuristic(1)
     end
     if top_1_delta != -Inf64
         @assert isnothing(property) "Cannot specify both epsilon and Top-1"
-        @assert 0.5 < top_1_delta < 1.0 "Invalid delta value for Top-1; must be in (0.5,1)"
-        property = get_top1_property(delta=top_1_delta)
+        @assert 0.5 <= top_1_delta < 1.0 "Invalid delta value for Top-1; must be in [0.5,1)"
+        property = get_top1_property(delta=top_1_delta, naive=parsed_args["naive"])
         split_heuristic = top1_configure_split_heuristic(1)
     end
     if isnothing(property)
         error("No property specified")
         return 1
+    end
+
+    if parsed_args["naive"]
+        println("Using naive verification")
+        VeryDiff.USE_DIFFZONO = false
+    else
+        println("Using differential verification")
+        VeryDiff.USE_DIFFZONO = true
     end
 
     result = SAFE

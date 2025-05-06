@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.10.4"
+julia_version = "1.10.1"
 manifest_format = "2.0"
 project_hash = "01b013ca273e9620767593b74d5585c82d54c81d"
 
@@ -132,7 +132,7 @@ weakdeps = ["Dates", "LinearAlgebra"]
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
-version = "1.1.1+0"
+version = "1.1.0+0"
 
 [[deps.ConstructionBase]]
 deps = ["LinearAlgebra"]
@@ -726,11 +726,11 @@ version = "0.1.6"
 
 [[deps.VNNLib]]
 deps = ["LinearAlgebra", "MLStyle", "Mmap", "ProtoBuf", "SymbolicUtils", "Tokenize"]
-git-tree-sha1 = "b825eb0d5fd2ef3d4d284e51feab682293ba1793"
-repo-rev = "bc097ea"
+git-tree-sha1 = "890088581945a793a25e16bbd4ac15ee837d5bf7"
+repo-rev = "c6bf990"
 repo-url = "https://github.com/samysweb/VNNLib.jl"
 uuid = "286915b0-5841-4eea-9013-d818f395ad8c"
-version = "0.2.2"
+version = "0.2.3"
 
 [[deps.Zlib_jll]]
 deps = ["Libdl"]
